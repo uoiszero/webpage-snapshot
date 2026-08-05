@@ -1,3 +1,12 @@
+const t = window.wpsI18n.t;
+
+document.getElementById('i18n-title').textContent = t('title');
+document.getElementById('i18n-description').textContent = t('description');
+document.getElementById('start').textContent = t('startSelect');
+document.getElementById('i18n-tipFormats').textContent = t('tipFormats');
+document.getElementById('i18n-tipEsc').innerHTML = t('tipEsc').replace('Esc', '<kbd>Esc</kbd>');
+document.getElementById('i18n-tipDownload').textContent = t('tipDownload');
+
 const startBtn = document.getElementById('start');
 const statusEl = document.getElementById('status');
 
@@ -13,8 +22,7 @@ startBtn.addEventListener('click', async () => {
     await chrome.tabs.sendMessage(tab.id, { type: 'WPS_START_SELECT' });
     window.close();
   } catch {
-    statusEl.textContent =
-      '无法在此页面使用（浏览器内置页面如 chrome:// 或扩展商店页面不支持注入）。请在有内容的网页上重试。';
+    statusEl.textContent = t('popupError');
     startBtn.disabled = false;
   }
 });

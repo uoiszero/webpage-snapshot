@@ -18,8 +18,10 @@
   if (window.__webpageSnapshotInjected) return;
   window.__webpageSnapshotInjected = true;
 
+  const t = window.wpsI18n.t;
+
   const Z_TOP = 2147483647;
-  const HINT_TEXT = '🖱 移动鼠标选择元素 · 点击选中 · Esc 取消';
+  const HINT_TEXT = t('hintText');
   const MOBILE_WIDTH = 375;
   const PADDING = 20; // 截图四周留白（px）
   const MAX_NODE_COUNT = 5000;
@@ -142,17 +144,17 @@
     toolbar.className = 'wps-toolbar';
     toolbar.innerHTML = `
       <span class="wps-info"></span>
-      <div class="wps-format" role="group" aria-label="图片格式">
-        <button class="wps-fmt active" data-format="default" title="默认格式：按页面原样捕获" aria-label="默认格式">
+      <div class="wps-format" role="group" aria-label="${t('ariaFmtDefault')}/${t('ariaFmtMobile')}">
+        <button class="wps-fmt active" data-format="default" title="${t('fmtDefaultTitle')}" aria-label="${t('ariaFmtDefault')}">
           <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="4" width="20" height="13" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>
         </button>
-        <button class="wps-fmt" data-format="mobile" title="手机格式：以 ${MOBILE_WIDTH}px 手机视口渲染" aria-label="手机格式">
+        <button class="wps-fmt" data-format="mobile" title="${t('fmtMobileTitle', { width: MOBILE_WIDTH })}" aria-label="${t('ariaFmtMobile')}">
           <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="7" y="2" width="10" height="20" rx="2"/><line x1="11" y1="18" x2="13" y2="18"/></svg>
         </button>
       </div>
-      <button class="wps-save">💾 保存</button>
-      <button class="wps-reselect">重新选择</button>
-      <button class="wps-cancel" title="取消">✕</button>`;
+      <button class="wps-save">${t('save')}</button>
+      <button class="wps-reselect">${t('reselect')}</button>
+      <button class="wps-cancel" title="${t('cancel')}">✕</button>`;
     toolbar.querySelector('.wps-save').addEventListener('click', onSave);
     toolbar
       .querySelector('.wps-reselect')
@@ -262,8 +264,9 @@
 
   function refreshToolbarInfo() {
     if (!selectedEl) return;
-    const fmt = saveFormat === 'mobile' ? ` · 手机 ${MOBILE_WIDTH}px` : '';
-    toolbar.querySelector('.wps-info').textContent = `已选择：${describeElement(selectedEl)}${fmt}`;
+    const fmt =
+      saveFormat === 'mobile' ? t('mobileSuffix', { width: MOBILE_WIDTH }) : '';
+    toolbar.querySelector('.wps-info').textContent = t('selectedPrefix') + describeElement(selectedEl) + fmt;
   }
 
   function hideToolbar() {
@@ -312,12 +315,12 @@
     if (!selectedEl) return;
     const saveBtn = toolbar.querySelector('.wps-save');
     saveBtn.disabled = true;
-    setToolbarMessage('正在重绘并保存…');
+    setToolbarMessage(t('saving'));
     try {
       await captureAndDownload(selectedEl, saveFormat);
       hideToolbar();
     } catch (err) {
-      setToolbarMessage(`保存失败：${err.message}`, true);
+      setToolbarMessage(t('saveFailed') + err.message, true);
       saveBtn.disabled = false;
     }
   }
@@ -327,7 +330,7 @@
 
     const nodeCount = el.querySelectorAll('*').length + 1;
     if (nodeCount > MAX_NODE_COUNT) {
-      console.warn(`[Webpage Snapshot] 元素包含 ${nodeCount} 个节点，捕获可能较慢。`);
+      console.warn(t('nodeWarn', { count: nodeCount }));
     }
 
     let renderTarget;
@@ -340,7 +343,7 @@
     try {
       const { blob, width, height } = await renderElementToBlob(renderTarget.element, renderTarget.ctx);
       if (width <= 0 || height <= 0) {
-        throw new Error('元素尺寸为 0，无法捕获');
+        throw new Error(t('errZeroSize'));
       }
       const suffix = format === 'mobile' ? 'mobile-' : '';
       const filename = `snapshot-${el.tagName.toLowerCase()}-${suffix}${Date.now()}.png`;
@@ -366,7 +369,7 @@
 
     const iDoc = iframe.contentDocument;
     const iWin = iframe.contentWindow;
-    if (!iDoc || !iWin) throw new Error('无法创建手机预览环境');
+    if (!iDoc || !iWin) throw new Error(t('errIframe'));
 
     iDoc.body.style.margin = '0';
     iDoc.body.style.width = MOBILE_WIDTH + 'px';
@@ -504,7 +507,7 @@
         lastError = err;
       }
     }
-    throw new Error(`无法导出 PNG${lastError ? '：' + lastError.message : '（尺寸过大）'}，部分图片可能受跨域限制`);
+    throw new Error(t('errExport') + (lastError ? ' (' + lastError.message + ')' : ''));
   }
 
   function svgToDataUrl(svgString) {
@@ -515,14 +518,17 @@
     return new Promise((resolve, reject) => {
       const img = ctx.createImage();
       img.onload = () => resolve(img);
-      img.onerror = () => reject(new Error('SVG 图像加载失败'));
+      img.onerror = () => reject(new Error(t('errSvgLoad')));
       img.src = url;
     });
   }
 
   function canvasToBlob(canvas) {
     return new Promise((resolve, reject) => {
-      canvas.toBlob((blob) => (blob ? resolve(blob) : reject(new Error('Canvas 转 PNG 失败'))), 'image/png');
+      canvas.toBlob(
+        (blob) => (blob ? resolve(blob) : reject(new Error(t('errCanvasPng')))),
+        'image/png'
+      );
     });
   }
 
@@ -694,7 +700,7 @@
           resolve(resp.dataUrl);
           return;
         }
-        reject(new Error((resp && resp.error) || '资源加载失败'));
+        reject(new Error((resp && resp.error) || t('errResourceLoad')));
       });
     });
   }
@@ -720,7 +726,7 @@
           } else if (resp && resp.ok) {
             resolve(resp.filename || filename);
           } else {
-            reject(new Error((resp && resp.error) || '下载失败'));
+            reject(new Error((resp && resp.error) || t('errDownload')));
           }
         });
       })

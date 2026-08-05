@@ -49,10 +49,16 @@ Chrome 插件（Manifest V3）：点击图标后，在页面上移动鼠标选�
 ```
 manifest.json   MV3 清单（downloads 权限 + content script 注入 + background worker）
 background.js   background service worker（代理 chrome.downloads 执行下载）
+i18n.js         语言文件（zh / en 词典 + 浏览器语言检测）
 popup.html/css  扩展弹窗（启动选择）
 popup.js        弹窗逻辑（向 content script 发送启动消息）
 content.js      选择交互 + SVG/Canvas 捕获 + 下载（核心逻辑）
 ```
+
+## 多语言
+
+界面文案统一放在 `i18n.js` 语言文件中，加载时检测浏览器语言：
+中文环境显示中文，其他语言显示英文。新增文案在词典中添加对应 key 即可。
 
 ## 已知限制
 
