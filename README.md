@@ -75,4 +75,4 @@ content.js      选择交互 + SVG/Canvas 捕获 + 下载（核心逻辑）
   元素不会被渲染（会从克隆体中移除）；`canvas` 会被转为静态图片。
 - 浏览器内置页面（`chrome://`、扩展商店）无法注入 content script，不能使用。
 - 保存位置为系统默认「下载」文件夹；如需弹出「另存为」对话框，
-  把 `content.js` 中 `saveAs: false` 改为 `true`。
+  把 `background.js` 中 `saveAs: false` 改为 `true`。

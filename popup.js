@@ -1,10 +1,10 @@
-const t = window.wpsI18n.t;
+const t = (window.wpsI18n && window.wpsI18n.t) || ((key) => key);
 
 document.getElementById('i18n-title').textContent = t('title');
 document.getElementById('i18n-description').textContent = t('description');
 document.getElementById('start').textContent = t('startSelect');
 document.getElementById('i18n-tipFormats').textContent = t('tipFormats');
-document.getElementById('i18n-tipEsc').innerHTML = t('tipEsc').replace('Esc', '<kbd>Esc</kbd>');
+document.getElementById('i18n-tipEsc').innerHTML = t('tipEsc').replace(/\{key\}/, '<kbd>Esc</kbd>');
 document.getElementById('i18n-tipDownload').textContent = t('tipDownload');
 
 const startBtn = document.getElementById('start');

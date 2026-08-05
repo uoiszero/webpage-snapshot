@@ -18,7 +18,7 @@
   if (window.__webpageSnapshotInjected) return;
   window.__webpageSnapshotInjected = true;
 
-  const t = window.wpsI18n.t;
+  const t = (window.wpsI18n && window.wpsI18n.t) || ((key) => key);
 
   const Z_TOP = 2147483647;
   const HINT_TEXT = t('hintText');
@@ -144,7 +144,7 @@
     toolbar.className = 'wps-toolbar';
     toolbar.innerHTML = `
       <span class="wps-info"></span>
-      <div class="wps-format" role="group" aria-label="${t('ariaFmtDefault')}/${t('ariaFmtMobile')}">
+      <div class="wps-format" role="group" aria-label="${t('formatGroupLabel')}">
         <button class="wps-fmt active" data-format="default" title="${t('fmtDefaultTitle')}" aria-label="${t('ariaFmtDefault')}">
           <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="4" width="20" height="13" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>
         </button>
@@ -507,7 +507,9 @@
         lastError = err;
       }
     }
-    throw new Error(t('errExport') + (lastError ? ' (' + lastError.message + ')' : ''));
+    throw new Error(
+      t('errExport') + (lastError ? ' (' + lastError.message + ')' : ` (${t('errSizeTooLarge')})`)
+    );
   }
 
   function svgToDataUrl(svgString) {
