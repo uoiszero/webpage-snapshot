@@ -1,0 +1,23 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Webpage Snapshot</title>
+  <link rel="stylesheet" href="popup.css" />
+</head>
+<body>
+  <main class="card">
+    <h1>网页快照</h1>
+    <p class="desc">在页面上选择任意元素，保存为图片。</p>
+    <button id="start" type="button">开始选择元素</button>
+    <p id="status" class="status" role="status"></p>
+    <p class="tips">
+      <span>支持默认、手机两种格式</span>
+      <span>选中后按 <kbd>Esc</kbd> 可取消</span>
+      <span>图片自动保存到「下载」文件夹</span>
+    </p>
+  </main>
+  <script src="popup.js"></script>
+</body>
+</html>

@@ -1,0 +1,22 @@
+{
+  "manifest_version": 3,
+  "name": "Webpage Snapshot",
+  "version": "1.0.0",
+  "description": "在页面上选择一个元素，通过 SVG foreignObject + Canvas 重绘为 PNG 图片并保存到本地",
+  "permissions": ["downloads"],
+  "host_permissions": ["<all_urls>"],
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "Webpage Snapshot - 选择元素并保存为 PNG"
+  },
+  "background": {
+    "service_worker": "background.js"
+  },
+  "content_scripts": [
+    {
+      "matches": ["<all_urls>"],
+      "js": ["content.js"],
+      "run_at": "document_idle"
+    }
+  ]
+}
