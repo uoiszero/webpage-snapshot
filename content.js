@@ -26,9 +26,11 @@
   const PADDING = 20; // 截图四周留白（px）
   const MAX_NODE_COUNT = 5000;
   const MAX_CANVAS_DIM = 16384; // Chrome 单边 32767，留余量
-  // 无法内联的资源（跨域/防盗链）换成透明像素，避免污染画布导致导出失败
+  // 无法内联的资源（跨域/防盗链）换成透明像素，避免污染画布导致导出失败。
+  // 注意：必须保证是真正的透明像素 rgba(0,0,0,0) —— 此前误用了一个
+  // 半透明蓝（rgba(0,0,255,127)）的 1x1 PNG，导致图片区域渲染成淡蓝色色块。
   const TRANSPARENT_PIXEL =
-    'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==';
+    'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=';
 
   /* ---------------- UI ---------------- */
 
@@ -638,20 +640,44 @@
       const dst = dstEls[i];
       if (!src || !dst) continue;
 
-      // <img>：内联 src（srcset 优先于 src，必须一并移除才能用内联地址）
+      // <img>：内联 src。优先 currentSrc（srcset 实际生效地址），失败后回退
+      // src 属性。部分站点（如微博）会给图片 URL 追加一次性签名参数 ssig：
+      // 浏览器加载图片后该签名即失效，再次请求被服务器拒绝；剥离签名参数后
+      // 重新请求即可成功，故把「剥离 ssig 的 URL」也纳入候选依次尝试。
       if (dst.tagName === 'IMG') {
         const srcAttr = src.getAttribute('src');
-        const current = src.currentSrc || srcAttr;
-        if (current && !/^data:/i.test(current)) {
-          const job = fetchAsDataUrl(current)
-            .then((dataUrl) => {
-              dst.setAttribute('src', dataUrl);
-              dst.removeAttribute('srcset');
-            })
-            .catch(() => {
-              dst.setAttribute('src', TRANSPARENT_PIXEL);
-              dst.removeAttribute('srcset');
-            });
+        const candidates = [];
+        const addCandidate = (u) => {
+          if (!u || /^data:/i.test(u) || candidates.includes(u)) return;
+          candidates.push(u);
+        };
+        addCandidate(src.currentSrc);
+        if (srcAttr !== src.currentSrc) addCandidate(srcAttr);
+        // 微博等站点会给图片 URL 追加一次性签名参数 ssig（加载后被消费，
+        // 再次请求会被服务器拒绝）；用 URL 对象移除该参数后重新请求可成功
+        if (src.currentSrc && /[?&]ssig=/.test(src.currentSrc)) {
+          try {
+            const parsed = new URL(src.currentSrc, location.href);
+            parsed.searchParams.delete('ssig');
+            addCandidate(parsed.href);
+          } catch {
+            /* URL 解析失败则跳过该候选 */
+          }
+        }
+        if (candidates.length) {
+          const job = (async () => {
+            let dataUrl = null;
+            for (const u of candidates) {
+              try {
+                dataUrl = await fetchAsDataUrl(u);
+                break;
+              } catch {
+                /* 尝试下一个候选地址 */
+              }
+            }
+            dst.removeAttribute('srcset');
+            dst.setAttribute('src', dataUrl || TRANSPARENT_PIXEL);
+          })();
           jobs.push(job);
         }
       }
