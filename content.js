@@ -131,7 +131,7 @@
   let hoverEl = null;
   let selectedEl = null;
   let selecting = false;
-  let saveFormat = 'default';
+  let saveFormat = 'mobile';
 
   function ensureUi() {
     if (overlay) return;
@@ -147,10 +147,10 @@
     toolbar.innerHTML = `
       <span class="wps-info"></span>
       <div class="wps-format" role="group" aria-label="${t('formatGroupLabel')}">
-        <button class="wps-fmt active" data-format="default" title="${t('fmtDefaultTitle')}" aria-label="${t('ariaFmtDefault')}">
+        <button class="wps-fmt" data-format="default" title="${t('fmtDefaultTitle')}" aria-label="${t('ariaFmtDefault')}">
           <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="4" width="20" height="13" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>
         </button>
-        <button class="wps-fmt" data-format="mobile" title="${t('fmtMobileTitle', { width: MOBILE_WIDTH })}" aria-label="${t('ariaFmtMobile')}">
+        <button class="wps-fmt active" data-format="mobile" title="${t('fmtMobileTitle', { width: MOBILE_WIDTH })}" aria-label="${t('ariaFmtMobile')}">
           <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="7" y="2" width="10" height="20" rx="2"/><line x1="11" y1="18" x2="13" y2="18"/></svg>
         </button>
       </div>
@@ -257,8 +257,8 @@
   }
 
   function showToolbar(el) {
-    saveFormat = 'default';
-    toolbar.querySelectorAll('.wps-fmt').forEach((b) => b.classList.toggle('active', b.dataset.format === 'default'));
+    saveFormat = 'mobile';
+    toolbar.querySelectorAll('.wps-fmt').forEach((b) => b.classList.toggle('active', b.dataset.format === 'mobile'));
     toolbar.querySelector('.wps-save').disabled = false;
     toolbar.style.display = 'flex';
     refreshToolbarInfo();
