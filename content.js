@@ -432,7 +432,8 @@
    *  - 复制页面全部样式（含内联 <style>，其相对 url 一并转为绝对）
    *  - 元素的相对路径资源（img/srcset）转为绝对地址
    *  - 等待 iframe 内字体与图片加载完成
-   *  - 若重排后仍超宽（非响应式站点），用 zoom 等比缩放到手机宽度
+   *  - 若重排后仍超宽（固定宽度布局）：注入 max-width 样式流式重排，
+   *    保持文字字号；个别压不动的元素再用 zoom 等比缩放兜底
    */
   async function setupMobileContext(el) {
     const iframe = document.createElement('iframe');
@@ -474,16 +475,25 @@
     let captureTarget = clone;
     const layoutWidth = clone.getBoundingClientRect().width;
     if (layoutWidth > MOBILE_WIDTH) {
-      // 非响应式站点：等比缩放使内容恰好适配手机宽度，字体随比例变小。
-      // zoom 元素的 offsetWidth 语义不可靠，故外包一个固定宽度容器，
-      // 捕获容器而非缩放元素本身。
-      const wrapper = iDoc.createElement('div');
-      wrapper.style.width = MOBILE_WIDTH + 'px';
-      clone.style.zoom = String(MOBILE_WIDTH / layoutWidth);
-      wrapper.appendChild(clone);
-      iDoc.body.appendChild(wrapper);
-      captureTarget = wrapper;
+      // 非响应式站点（固定宽度布局）：优先流式重排——用 max-width 压掉固定
+      // 宽度、保持文字原始字号，让内容在 375px 内自然换行，避免整页等比
+      // 缩放导致文字小到看不清。
+      clone.classList.add('wps-reflow');
+      injectReflowStyles(iDoc);
       await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
+      // 兜底：表格/代码块等 max-width 压不动的元素重排后仍超宽，此时剩余
+      // 超宽比例通常很小，再等比缩放防截断。zoom 元素的 offsetWidth 语义
+      // 不可靠，故外包一个固定宽度容器，捕获容器而非缩放元素本身。
+      const reflowedWidth = clone.getBoundingClientRect().width;
+      if (reflowedWidth > MOBILE_WIDTH) {
+        const wrapper = iDoc.createElement('div');
+        wrapper.style.width = MOBILE_WIDTH + 'px';
+        clone.style.zoom = String(MOBILE_WIDTH / reflowedWidth);
+        wrapper.appendChild(clone);
+        iDoc.body.appendChild(wrapper);
+        captureTarget = wrapper;
+        await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
+      }
     }
 
     return { element: captureTarget, ctx: makeContext(iWin), iframe };
@@ -527,6 +537,18 @@
       const style = n.getAttribute('style');
       if (style && style.includes('url(')) n.setAttribute('style', rewriteCssUrls(style));
     }
+  }
+
+  function injectReflowStyles(doc) {
+    const style = doc.createElement('style');
+    style.textContent = [
+      '.wps-reflow { width: auto !important; max-width: ' + MOBILE_WIDTH + 'px !important;' +
+        ' box-sizing: border-box !important; margin-left: 0 !important; margin-right: 0 !important; }',
+      '.wps-reflow img, .wps-reflow video, .wps-reflow iframe, .wps-reflow svg, .wps-reflow canvas, .wps-reflow table { max-width: 100% !important; }',
+      '.wps-reflow img, .wps-reflow video { height: auto !important; }',
+      '.wps-reflow * { max-width: 100%; }',
+    ].join('\n');
+    doc.head.appendChild(style);
   }
 
   function waitForImages(doc) {

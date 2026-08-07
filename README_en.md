@@ -22,7 +22,7 @@ After selecting an element, choose a format on the toolbar:
 - **Default**: captures the element as-is (width matches the element)
 - **Mobile**: renders at a mobile viewport, automatically adapting to narrow screens and fonts
   - Reflows the element inside a **375px-wide hidden iframe**; the site's responsive media queries actually apply, so layout and fonts adjust for mobile screens
-  - Non-responsive sites (still wider after reflow): proportionally scaled to 375px, fonts scale accordingly
+  - Non-responsive sites (still wider after reflow): reflowed to 375px — fixed widths are collapsed so text keeps its original size while re-wrapping; elements that cannot collapse (tables, code blocks, etc.) are proportionally scaled as a last resort
   - Output is a tall portrait image, ideal for mobile screens
 
 Mobile format files are saved as `snapshot-<tag>-mobile-<timestamp>.png`.
