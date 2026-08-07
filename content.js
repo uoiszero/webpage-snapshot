@@ -570,8 +570,11 @@
     const height = el.offsetHeight;
 
     const clone = cloneElementWithStyles(el, ctx);
-    stripUnwanted(clone);
+    // 先内联资源再移除无用节点：stripUnwanted 会改变克隆体结构，
+    // 而 inlineResources 按「原树与克隆体同索引」配对，顺序颠倒会导致
+    // 被移除节点之后的 img 全部错位、无法内联（如含 <video> 的文章正文）
     await inlineResources(el, clone, ctx);
+    stripUnwanted(clone);
 
     clone.style.width = width + 'px';
     clone.style.height = height + 'px';
