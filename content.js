@@ -100,7 +100,7 @@
     .wps-save { background: #0ea5e9; color: #fff; }
     .wps-save:hover { background: #0284c7; }
     .wps-save:disabled { background: #94a3b8; cursor: default; }
-    .wps-save, .wps-copy {
+    .wps-toolbar .wps-save, .wps-toolbar .wps-copy {
       display: inline-flex;
       align-items: center;
       justify-content: center;
@@ -350,19 +350,42 @@
     return navigator.clipboard.write([new window.ClipboardItem({ 'image/png': blob })]);
   }
 
+  // 渲染可能耗时较长（图片逐个抓取），clipboard.write 的瞬态用户激活窗口
+  // （Chrome 约 5 秒）会过期导致写入被拒；失败时缓存已渲染的 blob，
+  // 提示用户再次点击——第二次点击处于新的激活窗口内，可直接写入。
+  let cachedCopyBlob = null;
+  let cachedCopyKey = null;
+
   async function onCopy() {
     if (!selectedEl) return;
     const copyBtn = toolbar.querySelector('.wps-copy');
     copyBtn.disabled = true;
+    const key = selectedEl + '|' + saveFormat;
     setToolbarMessage(t('copying'));
     try {
-      const blob = await renderToBlob(selectedEl, saveFormat);
-      await copyBlobToClipboard(blob);
-      setToolbarMessage(t('copied'));
-      // 短暂展示成功提示后恢复元素信息
-      setTimeout(() => {
-        if (selectedEl && toolbar.style.display !== 'none') refreshToolbarInfo();
-      }, 2000);
+      // 命中缓存（同元素同格式）则跳过渲染，立即写入以利用本次点击的激活窗口
+      const blob =
+        cachedCopyBlob && cachedCopyKey === key ? cachedCopyBlob : await renderToBlob(selectedEl, saveFormat);
+      try {
+        await copyBlobToClipboard(blob);
+        cachedCopyBlob = null;
+        cachedCopyKey = null;
+        setToolbarMessage(t('copied'));
+        // 短暂展示成功提示后恢复元素信息
+        setTimeout(() => {
+          if (selectedEl && toolbar.style.display !== 'none') refreshToolbarInfo();
+        }, 2000);
+      } catch (err) {
+        if (!navigator.clipboard || typeof window.ClipboardItem === 'undefined') {
+          // 环境不支持剪贴板（非安全上下文等），重试也不会成功
+          setToolbarMessage(t('copyFailed') + t('copyUnsupported'), true);
+        } else {
+          // 写入失败（多为激活窗口过期）：缓存已渲染的图片，提示再次点击
+          cachedCopyBlob = blob;
+          cachedCopyKey = key;
+          setToolbarMessage(t('copyRetry'));
+        }
+      }
     } catch (err) {
       setToolbarMessage(t('copyFailed') + err.message, true);
     } finally {
