@@ -2,6 +2,8 @@
 
 **更新日期：** [请填写生效日期]
 
+> **正式页面：** <https://uoiszero.github.io/webpage-snapshot/PRIVACY_POLICY.html>
+
 ## 概述
 
 Webpage Snapshot 是一个 Chrome 扩展（Manifest V3），功能是让用户在网页上选择任意元素，并通过 SVG foreignObject + Canvas 重绘为 PNG 图片保存到本地设备。

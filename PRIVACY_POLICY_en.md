@@ -2,6 +2,8 @@
 
 **Last updated:** [Date]
 
+> **Official page:** <https://uoiszero.github.io/webpage-snapshot/PRIVACY_POLICY_en.html>
+
 ## Overview
 
 Webpage Snapshot is a Chrome extension (Manifest V3) that lets users select any element on a webpage and save it as a PNG image to their local device, using an SVG foreignObject + Canvas rendering pipeline.
