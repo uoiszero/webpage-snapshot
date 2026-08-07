@@ -667,7 +667,7 @@
     // 而 inlineResources 按「原树与克隆体同索引」配对，顺序颠倒会导致
     // 被移除节点之后的 img 全部错位、无法内联（如含 <video> 的文章正文）
     await inlineResources(el, clone, ctx);
-    stripUnwanted(clone);
+    stripUnwanted(clone, ctx);
 
     clone.style.width = width + 'px';
     clone.style.height = height + 'px';
@@ -699,16 +699,18 @@
   }
 
   /** 移除克隆体中不参与渲染 / 可能产生副作用的节点 */
-  function stripUnwanted(root) {
+  function stripUnwanted(root, ctx) {
     root
-      .querySelectorAll('script, style, link, meta, base, iframe, video, audio, source, input, textarea, select, form, noscript')
+      .querySelectorAll('script, style, link, meta, base, iframe, audio, source, input, textarea, select, form, noscript')
       .forEach((n) => n.remove());
+    // video 不参与渲染，替换为占位提示，保留其在页面中的占位尺寸
+    root.querySelectorAll('video').forEach((video) => video.replaceWith(makeVideoPlaceholder(video, ctx)));
     root
       .querySelectorAll('canvas')
       .forEach((canvas) => {
         try {
           const dataUrl = canvas.toDataURL('image/png');
-          const img = document.createElement('img');
+          const img = ctx.doc.createElement('img');
           img.src = dataUrl;
           img.style.cssText = canvas.style.cssText;
           img.width = canvas.width;
@@ -718,6 +720,38 @@
           /* 跨域污染的 canvas 无法读取，跳过 */
         }
       });
+  }
+
+  /**
+   * 生成 video 占位 div：尺寸沿用原 video 的计算样式（cloneElementWithStyles
+   * 已把计算样式内联到 video.style），虚线圆角蓝框 + 居中提示文字。
+   * 与图片缩放一致：内联 max-width: 100% 并在宽高均为像素值时用
+   * aspect-ratio 保持原始比例，容器不足时等比收缩，避免手机模式外框溢出。
+   */
+  function makeVideoPlaceholder(video, ctx) {
+    const div = ctx.doc.createElement('div');
+    const isPx = (v) => typeof v === 'string' && /px$/.test(v);
+    const w = parseFloat(video.style.width);
+    const h = parseFloat(video.style.height);
+    const ratioOk = isPx(video.style.width) && isPx(video.style.height) && w > 0 && h > 0;
+    div.style.cssText = [
+      'box-sizing: border-box',
+      'display: flex',
+      'align-items: center',
+      'justify-content: center',
+      'width: ' + (video.style.width || '100%'),
+      'max-width: 100%',
+      ratioOk ? 'aspect-ratio: ' + w + ' / ' + h + '; height: auto' : 'height: ' + (isPx(video.style.height) ? video.style.height : '160px'),
+      'border: 2px dashed #1677ff',
+      'border-radius: 8px',
+      'color: #1677ff',
+      'font-size: 14px',
+      'line-height: 1.5',
+      'text-align: center',
+      'padding: 8px',
+    ].join(';') + ';';
+    div.textContent = t('videoPlaceholder');
+    return div;
   }
 
   /**

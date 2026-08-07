@@ -73,8 +73,9 @@ content.js      选择交互 + SVG/Canvas 捕获 + 下载（核心逻辑）
   个别 web font 可能存在细微差异。
 - **超长元素**：Canvas 单边上限 16384px，超出时会自动降低输出分辨率以适配，
   不会导出失败；节点数超过 5000 时捕获会明显变慢，建议选择更小范围。
-- **动态内容 / 表单控件**：`input`、`textarea`、`select`、`iframe`、`video` 等
-  元素不会被渲染（会从克隆体中移除）；`canvas` 会被转为静态图片。
+- **动态内容 / 表单控件**：`input`、`textarea`、`select`、`iframe` 等元素不会被渲染
+  （会从克隆体中移除）；`video` 在原位置以虚线蓝框占位并提示「视频无法截图」；
+  `canvas` 会被转为静态图片。
 - 浏览器内置页面（`chrome://`、扩展商店）无法注入 content script，不能使用。
 - 保存位置为系统默认「下载」文件夹；如需弹出「另存为」对话框，
   把 `background.js` 中 `saveAs: false` 改为 `true`。

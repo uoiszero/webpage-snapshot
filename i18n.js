@@ -44,6 +44,7 @@
       errSizeTooLarge: '尺寸过大',
       errResourceLoad: '资源加载失败',
       errDownload: '下载失败',
+      videoPlaceholder: '视频无法截图',
     },
     en: {
       title: 'Webpage Snapshot',
@@ -82,6 +83,7 @@
       errSizeTooLarge: 'element too large',
       errResourceLoad: 'Failed to load resource',
       errDownload: 'Download failed',
+      videoPlaceholder: 'Video cannot be captured',
     },
   };
 

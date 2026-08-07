@@ -66,6 +66,6 @@ All UI strings live in the `i18n.js` language file. The language is detected at 
 - **Hotlink-protected / inaccessible images**: `<img>` and `background-image` are first fetched directly; on failure, the background worker inlines them as data URLs using host permissions to bypass CORS. Resources that still fail (e.g., CDNs with Referer checks) are shown as transparent placeholders, so export always succeeds.
 - **Fonts**: rendering relies on the browser resolving the font stack in the data URL SVG, which mostly matches the live page; individual web fonts may differ slightly.
 - **Very tall elements**: each canvas side is capped at 16384px; beyond that the output resolution is automatically reduced rather than failing. Elements with more than 5000 nodes capture noticeably slower — prefer a smaller selection.
-- **Dynamic content / form controls**: `input`, `textarea`, `select`, `iframe`, `video` etc. are not rendered (removed from the clone); `canvas` is converted to a static image.
+- **Dynamic content / form controls**: `input`, `textarea`, `select`, `iframe` etc. are not rendered (removed from the clone); `video` is replaced in place with a dashed blue placeholder box saying "Video cannot be captured"; `canvas` is converted to a static image.
 - Browser built-in pages (`chrome://`, Web Store) cannot have content scripts injected and are not supported.
 - Files are saved to the system "Downloads" folder; to show a "Save As" dialog instead, change `saveAs: false` to `true` in `background.js`.
