@@ -100,6 +100,15 @@
     .wps-save { background: #0ea5e9; color: #fff; }
     .wps-save:hover { background: #0284c7; }
     .wps-save:disabled { background: #94a3b8; cursor: default; }
+    .wps-save, .wps-copy {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      padding: 7px 9px;
+    }
+    .wps-copy { background: #e5e7eb; color: #1f2937; }
+    .wps-copy:hover { background: #d1d5db; }
+    .wps-copy:disabled { background: #d1d5db; cursor: default; }
     .wps-reselect { background: #e5e7eb; color: #1f2937; }
     .wps-reselect:hover { background: #d1d5db; }
     .wps-cancel { background: transparent; color: #ef4444; padding: 7px 8px; }
@@ -154,10 +163,16 @@
           <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="7" y="2" width="10" height="20" rx="2"/><line x1="11" y1="18" x2="13" y2="18"/></svg>
         </button>
       </div>
-      <button class="wps-save">${t('save')}</button>
+      <button class="wps-save" title="${t('save')}" aria-label="${t('save')}">
+        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>
+      </button>
+      <button class="wps-copy" title="${t('copy')}" aria-label="${t('copy')}">
+        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="8" y="2" width="8" height="4" rx="1" ry="1"/><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/></svg>
+      </button>
       <button class="wps-reselect">${t('reselect')}</button>
       <button class="wps-cancel" title="${t('cancel')}">✕</button>`;
     toolbar.querySelector('.wps-save').addEventListener('click', onSave);
+    toolbar.querySelector('.wps-copy').addEventListener('click', onCopy);
     toolbar
       .querySelector('.wps-reselect')
       .addEventListener('click', () => {
@@ -327,7 +342,36 @@
     }
   }
 
-  async function captureAndDownload(el, format) {
+  // 剪贴板 API 需安全上下文且页面聚焦；点击按钮本身就是用户手势，满足要求
+  function copyBlobToClipboard(blob) {
+    if (!navigator.clipboard || typeof window.ClipboardItem === 'undefined') {
+      throw new Error(t('copyUnsupported'));
+    }
+    return navigator.clipboard.write([new window.ClipboardItem({ 'image/png': blob })]);
+  }
+
+  async function onCopy() {
+    if (!selectedEl) return;
+    const copyBtn = toolbar.querySelector('.wps-copy');
+    copyBtn.disabled = true;
+    setToolbarMessage(t('copying'));
+    try {
+      const blob = await renderToBlob(selectedEl, saveFormat);
+      await copyBlobToClipboard(blob);
+      setToolbarMessage(t('copied'));
+      // 短暂展示成功提示后恢复元素信息
+      setTimeout(() => {
+        if (selectedEl && toolbar.style.display !== 'none') refreshToolbarInfo();
+      }, 2000);
+    } catch (err) {
+      setToolbarMessage(t('copyFailed') + err.message, true);
+    } finally {
+      copyBtn.disabled = false;
+    }
+  }
+
+  // 渲染所选元素为 PNG blob（保存与复制共用）
+  async function renderToBlob(el, format) {
     await document.fonts.ready;
 
     const nodeCount = el.querySelectorAll('*').length + 1;
@@ -347,13 +391,17 @@
       if (width <= 0 || height <= 0) {
         throw new Error(t('errZeroSize'));
       }
-      const suffix = format === 'mobile' ? 'mobile-' : '';
-      const filename = `snapshot-${el.tagName.toLowerCase()}-${suffix}${Date.now()}.png`;
-      await downloadBlob(blob, filename);
-      return filename;
+      return blob;
     } finally {
       renderTarget.iframe?.remove();
     }
+  }
+
+  async function captureAndDownload(el, format) {
+    const blob = await renderToBlob(el, format);
+    const suffix = format === 'mobile' ? 'mobile-' : '';
+    const filename = `snapshot-${el.tagName.toLowerCase()}-${suffix}${Date.now()}.png`;
+    return downloadBlob(blob, filename);
   }
 
   /**

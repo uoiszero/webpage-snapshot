@@ -39,7 +39,8 @@ Mobile format files are saved as `snapshot-<tag>-mobile-<timestamp>.png`.
 1. On the target page, click the extension icon → "Start Selecting"
 2. Move your mouse to select an element (live highlight), then click to confirm
 3. On the floating toolbar:
-   - **💾 Save** — redraws and downloads to the "Downloads" folder
+   - **Save (icon)** — redraws and downloads to the "Downloads" folder
+   - **Copy (icon)** — redraws and copies to the clipboard
    - **Reselect** — return to selection mode
    - **✕** — exit
 
