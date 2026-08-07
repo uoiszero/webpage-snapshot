@@ -1,6 +1,6 @@
 # Webpage Snapshot 隐私政策
 
-**更新日期：** [请填写生效日期]
+**更新日期：** 2026 年 8 月 7 日
 
 > **正式页面：** <https://uoiszero.github.io/webpage-snapshot/PRIVACY_POLICY.html>
 

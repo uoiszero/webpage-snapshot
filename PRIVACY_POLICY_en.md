@@ -1,6 +1,6 @@
 # Privacy Policy for Webpage Snapshot
 
-**Last updated:** [Date]
+**Last updated:** August 7, 2026
 
 > **Official page:** <https://uoiszero.github.io/webpage-snapshot/PRIVACY_POLICY_en.html>
 
