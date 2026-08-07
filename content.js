@@ -667,6 +667,8 @@
     // 而 inlineResources 按「原树与克隆体同索引」配对，顺序颠倒会导致
     // 被移除节点之后的 img 全部错位、无法内联（如含 <video> 的文章正文）
     await inlineResources(el, clone, ctx);
+    // 引用收集同样会改变克隆体结构，故必须在 inlineResources 之后执行
+    collectExternalSvgRefs(clone);
     stripUnwanted(clone, ctx);
 
     clone.style.width = width + 'px';
@@ -761,6 +763,7 @@
    * getComputedStyle 对其返回空值），再写回 clone 对应节点。
    */
   async function inlineResources(originalEl, clone, ctx) {
+    const SVG_NS = 'http://www.w3.org/2000/svg';
     const jobs = [];
     const srcEls = [originalEl, ...originalEl.querySelectorAll('*')];
     const dstEls = [clone, ...clone.querySelectorAll('*')];
@@ -812,25 +815,143 @@
         }
       }
 
+      // SVG <image>：内联 href（SVG2）/ xlink:href（旧写法）。
+      // 相对路径在 data URL 文档中无法解析，外部地址又受 img 上下文限制
+      // 加载失败，都会导致图像不渲染。
+      if (src.namespaceURI === SVG_NS && src.tagName.toLowerCase() === 'image') {
+        const href = src.getAttribute('href') || src.getAttribute('xlink:href');
+        if (href && !/^data:/i.test(href)) {
+          const job = fetchAsDataUrl(href)
+            .catch(() => TRANSPARENT_PIXEL)
+            .then((dataUrl) => {
+              dst.setAttribute('href', dataUrl);
+              if (dst.hasAttribute('xlink:href')) dst.removeAttribute('xlink:href');
+            });
+          jobs.push(job);
+        }
+      }
+
       // background-image：逐个 url() 转 dataURL
       const bg = ctx.getComputedStyle(src).backgroundImage;
-      if (!bg || !bg.includes('url(')) continue;
-      const urls = [...bg.matchAll(/url\(["']?([^"')]+)["']?\)/g)].map((m) => m[1]);
-      const job = Promise.all(
-        urls.map((u) =>
-          /^data:/i.test(u) ? Promise.resolve(u) : fetchAsDataUrl(u).catch(() => TRANSPARENT_PIXEL)
-        )
-      ).then((resolved) => {
-        let next = bg;
-        resolved.forEach((dataUrl, idx) => {
-          next = next.replace(urls[idx], dataUrl);
+      if (bg && bg.includes('url(')) {
+        const urls = [...bg.matchAll(/url\(["']?([^"')]+)["']?\)/g)].map((m) => m[1]);
+        const job = Promise.all(
+          urls.map((u) =>
+            /^data:/i.test(u) ? Promise.resolve(u) : fetchAsDataUrl(u).catch(() => TRANSPARENT_PIXEL)
+          )
+        ).then((resolved) => {
+          let next = bg;
+          resolved.forEach((dataUrl, idx) => {
+            next = next.replace(urls[idx], dataUrl);
+          });
+          dst.style.setProperty('background-image', next, 'important');
         });
-        dst.style.setProperty('background-image', next, 'important');
-      });
-      jobs.push(job);
+        jobs.push(job);
+      }
+
+      // mask-image / -webkit-mask-image：图标系统常用 mask 裁切，相对路径
+      // 在 data URL 文档中失效会导致图标整体消失，与背景图同样内联。
+      // 读取用 camelCase 属性名，setProperty 必须用 CSS 属性名（kebab-case）
+      const MASK_PROPS = [
+        ['maskImage', 'mask-image'],
+        ['webkitMaskImage', '-webkit-mask-image'],
+      ];
+      for (const [getProp, cssProp] of MASK_PROPS) {
+        const mask = ctx.getComputedStyle(src)[getProp];
+        if (!mask || !mask.includes('url(')) continue;
+        const urls = [...mask.matchAll(/url\(["']?([^"')]+)["']?\)/g)].map((m) => m[1]);
+        const job = Promise.all(
+          urls.map((u) =>
+            /^data:/i.test(u) ? Promise.resolve(u) : fetchAsDataUrl(u).catch(() => TRANSPARENT_PIXEL)
+          )
+        ).then((resolved) => {
+          let next = mask;
+          resolved.forEach((dataUrl, idx) => {
+            next = next.replace(urls[idx], dataUrl);
+          });
+          dst.style.setProperty(cssProp, next, 'important');
+        });
+        jobs.push(job);
+      }
     }
 
     await Promise.all(jobs);
+  }
+
+  /**
+   * 收集克隆体中引用了、但定义在选区外的 SVG 元素（symbol/linearGradient/
+   * radialGradient/pattern/filter/clipPath/mask 等），深克隆后分发到各引用
+   * 元素所在的 <svg> 根内。
+   *
+   * foreignObject 序列化后是独立文档，选区外的定义不会进入克隆体：
+   * <use href="#x">、fill="url(#x)" 等引用全部悬空，图形直接不渲染——
+   * 表现为"区域内的 SVG 没进截图"。常见于雪碧图（symbol + use）与
+   * 图表库（渐变/滤镜定义在页面别处）。
+   *
+   * 实现要点：
+   *  - 从克隆体扫描引用（此时计算样式已内联，url(#id) 以属性值形式可见），
+   *    同时覆盖 style 属性与 SVG 的 href/xlink:href
+   *  - 定义元素必须用 pageCtx（主文档）克隆：定义来自主文档，手机格式下
+   *    iframe 的 getComputedStyle 对其返回空值
+   *  - 按「引用元素所在的 <svg> 根」分发：CSS 的 url(#id) 引用只能解析到
+   *    同一 svg 根内的元素，统一塞进容器级 defs 会导致渐变/滤镜仍不渲染；
+   *    use 的 DOM 引用虽可跨根，但放入同根更稳妥
+   *  - 定义自身的嵌套引用（如 symbol 内部再引用渐变）递归归入同一 svg 根
+   *  - 需在 inlineResources 之后执行：插入 defs 会改变克隆体节点顺序，
+   *    破坏 inlineResources 的"原树与克隆体同索引"配对
+   */
+  function collectExternalSvgRefs(clone) {
+    const SVG_NS = 'http://www.w3.org/2000/svg';
+    const ID_REF_RE = /^#([A-Za-z_][\w:.-]*)$/;
+    const URL_REF_RE = /url\(\s*["']?#([A-Za-z_][\w:.-]*)["']?\s*\)/g;
+
+    const pending = [];
+    const doneBySvg = new Map();
+    const defsBySvg = new Map();
+
+    const scan = (root, overrideHost, sink) => {
+      for (const node of [root, ...root.querySelectorAll('*')]) {
+        const svgHost = overrideHost || (node.closest ? node.closest('svg') : null);
+        for (const attr of node.attributes) {
+          const v = attr.value || '';
+          if (node.namespaceURI === SVG_NS && (attr.name === 'href' || attr.name === 'xlink:href')) {
+            const m = ID_REF_RE.exec(v);
+            if (m) sink(svgHost, m[1]);
+            continue;
+          }
+          for (const m of v.matchAll(URL_REF_RE)) sink(svgHost, m[1]);
+        }
+      }
+    };
+
+    scan(clone, undefined, (svgHost, id) => pending.push({ svgHost, id }));
+    while (pending.length) {
+      const { svgHost, id } = pending.shift();
+      if (!doneBySvg.has(svgHost)) doneBySvg.set(svgHost, new Set());
+      if (doneBySvg.get(svgHost).has(id)) continue;
+      doneBySvg.get(svgHost).add(id);
+      const def = document.getElementById(id);
+      // 定义不存在或克隆体里已有同 id（区内引用，如区内 defs 的渐变/symbol）
+      // 则跳过。不能依赖 el.contains 判断：手机格式下 el 位于重排 iframe，
+      // contains 对主文档元素永远返回 false，会把区内引用误判为区外
+      if (!def || clone.querySelector('#' + CSS.escape(id))) continue;
+      const defClone = cloneElementWithStyles(def, pageCtx);
+      // 定义自身的嵌套引用（如 symbol 内再引用渐变）必须与定义同根解析
+      scan(def, svgHost, (host, nestedId) => pending.push({ svgHost: host, id: nestedId }));
+      if (!defsBySvg.has(svgHost)) defsBySvg.set(svgHost, []);
+      defsBySvg.get(svgHost).push(defClone);
+    }
+
+    for (const [svgHost, defClones] of defsBySvg) {
+      const host = svgHost || clone.querySelector('svg');
+      if (!host) continue;
+      let defs = host.querySelector(':scope > defs');
+      if (!defs) {
+        defs = pageCtx.createElementNS(SVG_NS, 'defs');
+        host.prepend(defs);
+      }
+      defClones.forEach((d) => defs.appendChild(d));
+    }
   }
 
   /**
