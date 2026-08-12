@@ -3,7 +3,7 @@
   "name": "Webpage Snapshot",
   "version": "1.0.0",
   "description": "在页面上选择一个元素，通过 SVG foreignObject + Canvas 重绘为 PNG 图片并保存到本地",
-  "permissions": ["downloads"],
+  "permissions": ["downloads", "declarativeNetRequestWithHostAccess"],
   "host_permissions": ["<all_urls>"],
   "action": {
     "default_popup": "popup.html",

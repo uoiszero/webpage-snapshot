@@ -67,8 +67,9 @@ content.js      选择交互 + SVG/Canvas 捕获 + 下载（核心逻辑）
 ## 已知限制
 
 - **防盗链 / 无法访问的图片**：`<img>` 与 `background-image` 会先尝试直连，
-  失败后经 background 借助 host 权限绕过 CORS 内联为 data URL；仍失败的
-  （如 CDN 带 Referer 校验）会以透明占位显示，保证图片始终可正常导出。
+  失败后经 background 借助 host 权限绕过 CORS 内联为 data URL；抓取时会把
+  Referer 临时改写为页面来源，可绕过 sinaimg 等图床的 Referer 防盗链；
+  仍失败的（如服务器要求登录态 Cookie）会以透明占位显示，保证图片始终可正常导出。
 - **字体**：截图依赖浏览器对 data URL SVG 中的字体栈解析，与页面渲染基本一致；
   个别 web font 可能存在细微差异。
 - **超长元素**：Canvas 单边上限 16384px，超出时会自动降低输出分辨率以适配，
