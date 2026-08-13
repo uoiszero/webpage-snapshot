@@ -6,6 +6,7 @@
  *   2. 页面内 hover 高亮，点击选中元素，浮动工具条确认
  *   3. 捕获：深克隆元素 + 内联计算样式 + 图片转 dataURL
  *      → SVG foreignObject → Canvas 重绘 → PNG blob
+ *      → 底部追加截图时间与页面链接信息条（weibo.com 取该条微博详情链接）
  *   4. 交由 background（chrome.downloads）保存到本地
  *
  * 格式：
@@ -24,6 +25,10 @@
   const HINT_TEXT = t('hintText');
   const MOBILE_WIDTH = 375;
   const PADDING = 20; // 截图四周留白（px）
+  // 底部信息条高度（px）= 1 分隔线 + 上下各 6 内边距 + 两行各 20 行框。
+  // 必须与 appendFooter 里各行的 height/line-height 硬编码值保持一致，
+  // 高度整数锁定、零隐式计算，避免任何渲染偏差导致第二行被裁切。
+  const FOOTER_HEIGHT = 53;
   const MAX_NODE_COUNT = 5000;
   const MAX_CANVAS_DIM = 16384; // Chrome 单边 32767，留余量
   // 无法内联的资源（跨域/防盗链）换成透明像素，避免污染画布导致导出失败。
@@ -653,6 +658,96 @@
   }
 
   /**
+   * 底部信息条：第一行截图时间（UTC），第二行页面链接（超长以省略号截断）。
+   * 追加在克隆体之后，不参与克隆体布局；行高与 FOOTER_HEIGHT 严格对应。
+   */
+  function appendFooter(wrapper, el, ctx) {
+    const footer = ctx.doc.createElement('div');
+    footer.style.cssText = [
+      'box-sizing: border-box',
+      'display: block',
+      'width: 100%',
+      'height: ' + FOOTER_HEIGHT + 'px',
+      'padding: 6px 12px',
+      'border-top: 1px solid #e5e7eb',
+      'background: #f3f4f6',
+      'color: #4b5563',
+      'font-size: 12px',
+      'font-family: -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif',
+    ].join(';') + ';';
+
+    // 两行都是 height + line-height 双写硬固定（20px），12px 文字在行框内
+    // 上下各留约 4px 余量：即便行高声明意外退化，字形也不会贴到裁切边，
+    // 从根上杜绝「字母下半截被切」。
+    const timeRow = ctx.doc.createElement('div');
+    timeRow.style.cssText =
+      'box-sizing: border-box; height: 20px; line-height: 20px; white-space: nowrap; overflow: hidden;';
+    timeRow.textContent = t('footerTime', { time: formatUtcTime() });
+
+    const linkRow = ctx.doc.createElement('div');
+    linkRow.style.cssText =
+      'box-sizing: border-box; height: 20px; line-height: 20px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;';
+    linkRow.textContent = t('footerLink', { url: resolvePageLink(el) });
+
+    footer.appendChild(timeRow);
+    footer.appendChild(linkRow);
+    wrapper.appendChild(footer);
+  }
+
+  /** 当前 UTC 时间，格式 YYYY-MM-DD HH:mm:ss UTC */
+  function formatUtcTime() {
+    const d = new Date();
+    const p = (n) => String(n).padStart(2, '0');
+    return (
+      d.getUTCFullYear() +
+      '-' + p(d.getUTCMonth() + 1) +
+      '-' + p(d.getUTCDate()) +
+      ' ' + p(d.getUTCHours()) +
+      ':' + p(d.getUTCMinutes()) +
+      ':' + p(d.getUTCSeconds()) +
+      ' UTC'
+    );
+  }
+
+  /** 截图对应的页面链接：weibo.com 取该条微博详情链接，其他站点用当前地址 */
+  function resolvePageLink(el) {
+    if (location.hostname === 'weibo.com' || location.hostname.endsWith('.weibo.com')) {
+      const postLink = findWeiboPostLink(el);
+      if (postLink) return postLink;
+    }
+    return location.href;
+  }
+
+  /**
+   * 找微博详情链接：先在所选元素内、再回退整个页面，依次尝试三种形态——
+   * 旧版时间元素 a[node-type="feed_list_item_date"]（href 形如 /{uid}/{mid}）、
+   * 新版 a[href*="/detail/"]、以及匹配 weibo.com/{uid}/{mid} 的任意链接兜底。
+   * 正则天然排除 /u/ 个人主页、/search 搜索页与头像链接。
+   */
+  function findWeiboPostLink(el) {
+    const abs = (h) => {
+      try {
+        return new URL(h, location.href).href;
+      } catch {
+        return null;
+      }
+    };
+    for (const root of [el, document]) {
+      const legacy = root.querySelector('a[node-type="feed_list_item_date"]');
+      const legacyHref = legacy && abs(legacy.getAttribute('href'));
+      if (legacyHref) return legacyHref;
+      const detail = root.querySelector('a[href*="/detail/"]');
+      const detailHref = detail && abs(detail.getAttribute('href'));
+      if (detailHref) return detailHref;
+      for (const a of root.querySelectorAll('a[href]')) {
+        const href = abs(a.getAttribute('href'));
+        if (href && /weibo\.com\/\d+\/[A-Za-z0-9]+/i.test(href)) return href;
+      }
+    }
+    return null;
+  }
+
+  /**
    * 构造 SVG foreignObject：
    *  - 根元素设置显式宽高（clone 的 computed width/height 可能是 auto）
    *  - 根元素 margin 清零（捕获区域即为该元素边框盒）
@@ -661,6 +756,7 @@
   async function buildSvg(el, ctx) {
     const width = el.offsetWidth;
     const height = el.offsetHeight;
+    const totalHeight = height + FOOTER_HEIGHT;
 
     const clone = cloneElementWithStyles(el, ctx);
     // 先内联资源再移除无用节点：stripUnwanted 会改变克隆体结构，
@@ -671,8 +767,16 @@
     collectExternalSvgRefs(clone);
     stripUnwanted(clone, ctx);
 
+    // 强制 border-box 并清除 min/max 约束：offsetWidth/Height 是边框盒尺寸，
+    // 若克隆体保留页面的 content-box，height/width 会把 padding/border 重复
+    // 计入，边框盒超出捕获区，把底部 footer 顶出 SVG 视口导致链接行被裁切。
+    clone.style.boxSizing = 'border-box';
     clone.style.width = width + 'px';
     clone.style.height = height + 'px';
+    clone.style.minWidth = '';
+    clone.style.maxWidth = '';
+    clone.style.minHeight = '';
+    clone.style.maxHeight = '';
     clone.style.margin = '0';
 
     const SVG_NS = 'http://www.w3.org/2000/svg';
@@ -681,23 +785,24 @@
     const svg = ctx.createElementNS(SVG_NS, 'svg');
     svg.setAttribute('xmlns', SVG_NS);
     svg.setAttribute('width', width);
-    svg.setAttribute('height', height);
-    svg.setAttribute('viewBox', `0 0 ${width} ${height}`);
+    svg.setAttribute('height', totalHeight);
+    svg.setAttribute('viewBox', `0 0 ${width} ${totalHeight}`);
 
     const fo = ctx.createElementNS(SVG_NS, 'foreignObject');
-    fo.setAttribute('width', '100%');
-    fo.setAttribute('height', '100%');
+    fo.setAttribute('width', width);
+    fo.setAttribute('height', totalHeight);
 
     const div = ctx.createElementNS(XHTML_NS, 'div');
     div.setAttribute('xmlns', XHTML_NS);
-    div.style.width = '100%';
-    div.style.height = '100%';
+    div.style.width = width + 'px';
+    div.style.height = totalHeight + 'px';
     div.appendChild(clone);
+    appendFooter(div, el, ctx);
 
     fo.appendChild(div);
     svg.appendChild(fo);
 
-    return { svgString: ctx.serialize(svg), width, height };
+    return { svgString: ctx.serialize(svg), width, height: totalHeight };
   }
 
   /** 移除克隆体中不参与渲染 / 可能产生副作用的节点 */

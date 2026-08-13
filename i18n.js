@@ -45,6 +45,8 @@
       errResourceLoad: '资源加载失败',
       errDownload: '下载失败',
       videoPlaceholder: '视频无法截图',
+      footerTime: '截图时间：{time}',
+      footerLink: '页面链接：{url}',
     },
     en: {
       title: 'Webpage Snapshot',
@@ -84,6 +86,8 @@
       errResourceLoad: 'Failed to load resource',
       errDownload: 'Download failed',
       videoPlaceholder: 'Video cannot be captured',
+      footerTime: 'Captured at: {time}',
+      footerLink: 'Page link: {url}',
     },
   };
 

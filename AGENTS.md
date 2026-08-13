@@ -46,6 +46,10 @@ webpage-snapshot/          # 全部文件位于根目录，无子目录
 | `setupMobileContext(el)` | function | content.js | 手机格式：iframe 重排 + 行高/缩放适配 |
 | `buildSvg(el, ctx)` | function | content.js | 克隆+内联样式+序列化 SVG foreignObject |
 | `renderCanvas(image, w, h, ctx)` | function | content.js | Canvas 绘制，DPR 自适应（上限 16384） |
+| `appendFooter(wrapper, el, ctx)` | function | content.js | 底部信息条：UTC 时间 + 页面链接，行高与 FOOTER_HEIGHT 严格对应 |
+| `formatUtcTime()` | function | content.js | 当前 UTC 时间，格式 `YYYY-MM-DD HH:mm:ss UTC` |
+| `resolvePageLink(el)` | function | content.js | 页面链接：weibo.com 取该条微博详情链接，其他站点用当前地址 |
+| `findWeiboPostLink(el)` | function | content.js | 微博详情链接三形态匹配（旧版 node-type / 新版 /detail/ / 正则兜底） |
 | `inlineResources(el, clone, ctx)` | function | content.js | 图片/背景转 data URL，失败换透明占位 |
 | `fetchAsDataUrl(url)` | function | content.js | 直连失败→background 代理（绕过 CORS） |
 | `window.wpsI18n.t(key, params)` | global | i18n.js | 文案获取，`{param}` 占位符 |
