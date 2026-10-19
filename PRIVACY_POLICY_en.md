@@ -37,12 +37,15 @@ The extension requests the following permissions, used solely for its core funct
 
    This permission exists solely to enable the screenshot feature. The extension does not read, modify, or intercept any page data unrelated to capturing the element the user selected.
 
+3. **declarativeNetRequestWithHostAccess** — Used only while fetching hotlink-protected images: temporarily rewrites the Referer request header of that image request to the current page origin, then removes the rule immediately. It never intercepts or rewrites page requests unrelated to the capture.
+
 ## How Data Is Processed
 
 - When the user selects an element, the extension clones that element's DOM subtree and inlines computed styles, entirely **within the user's browser**.
 - Image resources are fetched and converted to data URLs **in memory only**, solely for rendering the screenshot.
 - The final PNG is generated locally via the SVG foreignObject + Canvas pipeline and saved to the user's local Downloads folder or copied to the clipboard **only when the user explicitly performs the action**.
 - Page content, screenshots, and any other data **never leave the user's device**.
+- Image fetches follow normal browser behaviour and carry the current site's cookies (some images require a logged-in session). The extension itself does not set or read cookies, and never uses them for tracking or analytics.
 
 ## Third-Party Sharing
 

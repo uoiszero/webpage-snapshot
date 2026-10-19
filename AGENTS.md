@@ -12,7 +12,7 @@
 ## OVERVIEW
 
 Chrome 扩展（Manifest V3，无构建步骤）：在页面中选择任意元素，经 SVG foreignObject + Canvas 重绘为 PNG 并保存到本地。
-核心为单文件 content script（1129 行），背景服务 worker 代理下载与跨域抓取，界面文案走统一 i18n 语言文件。
+核心为单文件 content script（1202 行），背景服务 worker 代理下载与跨域抓取，界面文案走统一 i18n 语言文件。
 
 ## STRUCTURE
 
@@ -20,7 +20,7 @@ Chrome 扩展（Manifest V3，无构建步骤）：在页面中选择任意元�
 webpage-snapshot/          # 全部文件位于根目录，无子目录
 ├── manifest.json          # MV3 清单：downloads 权限 + <all_urls> host + content_scripts
 ├── i18n.js                # 语言文件（zh/en 词典 + 浏览器语言检测），必须先于 content.js 加载
-├── content.js             # 核心：选择交互 + SVG/Canvas 捕获 + 下载（1129 行）
+├── content.js             # 核心：选择交互 + SVG/Canvas 捕获 + 下载（1202 行）
 ├── background.js          # service worker：代理 chrome.downloads 与 CORS 绕过抓取
 ├── popup.html/.css/.js    # 扩展弹窗（启动选择）
 └── README.md / README_en.md
@@ -48,6 +48,9 @@ webpage-snapshot/          # 全部文件位于根目录，无子目录
 | `renderElementToBlob(el, ctx)` | function | content.js | `buildSvg` → `renderCanvas` → `canvasToBlob` 的整条管线 |
 | `buildSvg(el, ctx)` | function | content.js | 克隆+内联样式+剥离干扰+序列化 SVG foreignObject |
 | `cloneElementWithStyles(el, ctx)` | function | content.js | 深克隆并把整棵子树内联计算样式写回 |
+| `pairElements(srcRoot, dstRoot)` | function | content.js | 原树与克隆体按文档顺序配对（计算样式/资源内联共用） |
+| `inlineCssUrls(ctx, src, dst, getProp, cssProp)` | function | content.js | background/mask 的 `url()` 转 data URL，`#id` 片段引用保留 |
+| `settleWithin(promise, ms)` | function | content.js | 资源等待上限，超时按未就绪继续（防永久挂起） |
 | `renderCanvas(image, w, h, ctx)` | function | content.js | Canvas 绘制，DPR 自适应（上限 16384） |
 | `appendFooter(wrapper, el, ctx)` | function | content.js | 底部信息条：UTC 时间 + 页面链接，行高与 FOOTER_HEIGHT 严格对应 |
 | `formatUtcTime()` | function | content.js | 当前 UTC 时间，格式 `YYYY-MM-DD HH:mm:ss UTC` |
@@ -56,7 +59,7 @@ webpage-snapshot/          # 全部文件位于根目录，无子目录
 | `inlineResources(el, clone, ctx)` | function | content.js | 图片/背景转 data URL，失败换透明占位 |
 | `stripUnwanted(root, ctx)` | function | content.js | 剔除 script/style/link/iframe/表单等，替换 video/canvas 为可渲染内容 |
 | `makeVideoPlaceholder(video, ctx)` | function | content.js | video → 虚线蓝框占位 div，保持原尺寸与比例 |
-| `collectExternalSvgRefs(clone)` | function | content.js | 收集克隆体内外部 `<svg>`/`<use>` 引用，供选区外资源补内 |
+| `collectExternalSvgRefs(clone)` | function | content.js | 收集克隆体内外部 `<svg>`/`<use>` 引用，供选区外资源补内（内部资源二次内联） |
 | `copyAttributes(from, to)` | function | content.js | 拷贝全部属性到克隆对应节点 |
 | `rewriteCssUrls(cssText)` | function | content.js | 样式表相对 `url()` 改写为绝对地址 |
 | `absolutizeUrls(root)` | function | content.js | 元素相对资源（img/srcset 等）转绝对地址 |
@@ -69,9 +72,9 @@ webpage-snapshot/          # 全部文件位于根目录，无子目录
 
 - **文案必须走 `wpsI18n.t()`**，禁止在 content.js / popup 中硬编码用户可见字符串
 - 新增 i18n key 必须 zh 与 en **两个词典同步添加**，参数占位符（`{width}`/`{count}`/`{key}`）两边一致
-- content script 与 background 通信统一 `chrome.runtime.sendMessage`，消息类型前缀 `WPS_`（`WPS_START_SELECT` / `WPS_DOWNLOAD` / `WPS_FETCH_DATA_URL`）
+- content script 与 background 通信统一 `chrome.runtime.sendMessage`，消息类型前缀 `WPS_`（`WPS_DOWNLOAD` / `WPS_FETCH_DATA_URL`）；popup 启动选择用 `chrome.tabs.sendMessage` 发送 `WPS_START_SELECT`（popup → content）
 - 捕获管线必须通过 `ctx` 操作 DOM（`getComputedStyle`/`Image`/canvas/`XMLSerializer` 均从 ctx 取），不直接用全局
-- 可调常量集中在 `content.js` 顶部：`MOBILE_WIDTH`(375)、`PADDING`(20)、`MAX_CANVAS_DIM`(16384)、`MAX_NODE_COUNT`(5000)、`FOOTER_HEIGHT`(53)、`TRANSPARENT_PIXEL`
+- 可调常量集中在 `content.js` 顶部：`MOBILE_WIDTH`(375)、`PADDING`(20)、`MAX_CANVAS_DIM`(16384)、`MAX_NODE_COUNT`(5000)、`FOOTER_HEIGHT`(53)、`TRANSPARENT_PIXEL`、`IFRAME_PROBE_HEIGHT`(2000)、`LAYOUT_SETTLE_MS`(200)、`RESOURCE_WAIT_MS`(5000)、`FETCH_TIMEOUT_MS`(15000)；后两个是资源等待/抓取上限，超时按资源缺失降级出图，避免捕获无限挂起
 - `appendFooter` 的信息条高度必须与 `FOOTER_HEIGHT` 严格一致，修改底部信息条布局时需同步更新该常量
 
 ## ANTI-PATTERNS (THIS PROJECT)
@@ -99,7 +102,10 @@ node --check *.js            # 语法校验（i18n/background/popup/content）
 - content script 用 `window.__webpageSnapshotInjected` 做注入单例防护，重复注入直接 return
 - 手机格式在 about:blank iframe 中重排，需把样式表相对 `url()` 与元素相对资源重写为绝对地址
 - 画布单边上限受浏览器限制（Chrome 32767），代码内 `MAX_CANVAS_DIM` 留余量；超限时降低 DPR 而非失败
-- 底部信息条追加在克隆体之后、不参与布局；`buildSvg` 会把 `content-box` 元素的外边距计入总高，否则第二行链接会被裁出视口
+- 底部信息条追加在克隆体之后、不参与布局；`buildSvg` 强制根元素 `box-sizing: border-box` 并清除 `margin`/`min`/`max`，避免边框盒超出 SVG 视口把第二行链接裁掉
+- 复制缓存按「元素对象身份 + 格式」命中，重选/取消时清空；不能用元素字符串（所有 div 都是 `[object HTMLDivElement]`）
+- 选区外 SVG 定义由 `collectExternalSvgRefs` 克隆进克隆体后，必须再对其执行 `inlineResources`，否则 def 内的外部 `<image>`/背景图不会内联
+- `Esc` 在选择态与工具条态都生效：`keydown` 监听在 `startSelection` 注册、`cleanupAll` 移除，`cleanupSelection` 只清选择态监听
 - 微博图片 URL 带一次性签名参数 `ssig`（加载后失效），`inlineResources` 会剥离该参数后重试
 - 超长元素（>5000 节点）捕获会明显变慢，超限仅告警不中止
 - `saveAs: false` 选项在 `background.js` 的 downloads 调用处

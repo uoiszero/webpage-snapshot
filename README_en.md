@@ -19,7 +19,7 @@ Chrome extension (Manifest V3): click the icon, then move your mouse to select a
 
 After selecting an element, choose a format on the toolbar:
 
-- **Default**: captures the element as-is (width matches the element)
+- **Default**: captures the element as-is in the page's current layout, with 20px white padding around the canvas and an info bar at the bottom (UTC capture time + page link)
 - **Mobile**: renders at a mobile viewport, automatically adapting to narrow screens and fonts
   - Reflows the element inside a **375px-wide hidden iframe**; the site's responsive media queries actually apply, so layout and fonts adjust for mobile screens
   - Non-responsive sites (still wider after reflow): reflowed to 375px — fixed widths are collapsed so text keeps its original size while re-wrapping; elements that cannot collapse (tables, code blocks, etc.) are proportionally scaled as a last resort
@@ -44,7 +44,7 @@ Mobile format files are saved as `snapshot-<tag>-mobile-<timestamp>.png`.
    - **Reselect** — return to selection mode
    - **✕** — exit
 
-Shortcut: press `Esc` while in selection mode to cancel.
+Shortcut: `Esc` cancels selection in selection mode, and closes the toolbar after an element is selected.
 
 ## File structure
 
