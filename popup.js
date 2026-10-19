@@ -1,5 +1,9 @@
 const t = (window.wpsI18n && window.wpsI18n.t) || ((key) => key);
 
+// html lang 跟随实际语言：英文环境下不能残留中文 lang
+document.documentElement.lang =
+  window.wpsI18n && window.wpsI18n.lang === 'zh' ? 'zh-CN' : 'en';
+
 document.getElementById('i18n-title').textContent = t('title');
 document.getElementById('i18n-description').textContent = t('description');
 document.getElementById('start').textContent = t('startSelect');

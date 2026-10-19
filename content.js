@@ -31,6 +31,12 @@
   const FOOTER_HEIGHT = 53;
   const MAX_NODE_COUNT = 5000;
   const MAX_CANVAS_DIM = 16384; // Chrome 单边 32767，留余量
+  // 手机格式：隐藏 iframe 的探测高度，以及重排后等待布局稳定的时间
+  const IFRAME_PROBE_HEIGHT = 2000;
+  const LAYOUT_SETTLE_MS = 200;
+  // 资源等待与抓取上限：超时按「资源缺失」降级出图，避免捕获无限挂起
+  const RESOURCE_WAIT_MS = 5000;
+  const FETCH_TIMEOUT_MS = 15000;
   // 无法内联的资源（跨域/防盗链）换成透明像素，避免污染画布导致导出失败。
   // 注意：必须保证是真正的透明像素 rgba(0,0,0,0) —— 此前误用了一个
   // 半透明蓝（rgba(0,0,255,127)）的 1x1 PNG，导致图片区域渲染成淡蓝色色块。
@@ -186,12 +192,7 @@
       });
     toolbar.querySelector('.wps-cancel').addEventListener('click', cleanupAll);
     toolbar.querySelectorAll('.wps-fmt').forEach((btn) => {
-      btn.addEventListener('click', () => {
-        toolbar.querySelectorAll('.wps-fmt').forEach((b) => b.classList.remove('active'));
-        btn.classList.add('active');
-        saveFormat = btn.dataset.format;
-        refreshToolbarInfo();
-      });
+      btn.addEventListener('click', () => setFormat(btn.dataset.format));
     });
 
     document.documentElement.appendChild(overlay);
@@ -210,6 +211,9 @@
     document.addEventListener('mousemove', onMouseMove, true);
     document.addEventListener('mousedown', onMouseDownCapture, true);
     document.addEventListener('click', onSelectClick, true);
+    // Esc 在选择态与工具条态都要生效：监听挂在选择入口，cleanupAll 统一移除；
+    // 先 remove 再 add 保证重复进入选择时不会堆叠。
+    document.removeEventListener('keydown', onKeyDown, true);
     document.addEventListener('keydown', onKeyDown, true);
   }
 
@@ -217,15 +221,16 @@
     selecting = false;
     hoverEl = null;
     selectedEl = null;
+    copyCache = null;
     if (overlay) overlay.style.display = 'none';
     document.removeEventListener('mousemove', onMouseMove, true);
     document.removeEventListener('mousedown', onMouseDownCapture, true);
     document.removeEventListener('click', onSelectClick, true);
-    document.removeEventListener('keydown', onKeyDown, true);
   }
 
   function cleanupAll() {
     cleanupSelection();
+    document.removeEventListener('keydown', onKeyDown, true);
     if (hint) hint.style.display = 'none';
     hideToolbar();
   }
@@ -276,19 +281,28 @@
     return s;
   }
 
+  // 统一的格式切换：更新 saveFormat、按钮选中态与工具条信息
+  function setFormat(format) {
+    saveFormat = format;
+    toolbar
+      .querySelectorAll('.wps-fmt')
+      .forEach((b) => b.classList.toggle('active', b.dataset.format === format));
+    refreshToolbarInfo();
+  }
+
   function showToolbar(el) {
-    saveFormat = 'mobile';
-    toolbar.querySelectorAll('.wps-fmt').forEach((b) => b.classList.toggle('active', b.dataset.format === 'mobile'));
+    setFormat('mobile');
     toolbar.querySelector('.wps-save').disabled = false;
     toolbar.style.display = 'flex';
-    refreshToolbarInfo();
   }
 
   function refreshToolbarInfo() {
     if (!selectedEl) return;
-    const fmt =
-      saveFormat === 'mobile' ? t('mobileSuffix', { width: MOBILE_WIDTH }) : '';
-    toolbar.querySelector('.wps-info').textContent = t('selectedPrefix') + describeElement(selectedEl) + fmt;
+    const info = toolbar.querySelector('.wps-info');
+    const fmt = saveFormat === 'mobile' ? t('mobileSuffix', { width: MOBILE_WIDTH }) : '';
+    info.textContent = t('selectedPrefix') + describeElement(selectedEl) + fmt;
+    // 复位颜色：报错时 setToolbarMessage 会把文字置红，恢复正常文案时需还原
+    info.style.color = '#6b7280';
   }
 
   function hideToolbar() {
@@ -347,9 +361,14 @@
     }
   }
 
+  // 剪贴板能力判断（非安全上下文等环境不支持，重试也不会成功）
+  function supportsClipboard() {
+    return !!navigator.clipboard && typeof window.ClipboardItem !== 'undefined';
+  }
+
   // 剪贴板 API 需安全上下文且页面聚焦；点击按钮本身就是用户手势，满足要求
   function copyBlobToClipboard(blob) {
-    if (!navigator.clipboard || typeof window.ClipboardItem === 'undefined') {
+    if (!supportsClipboard()) {
       throw new Error(t('copyUnsupported'));
     }
     return navigator.clipboard.write([new window.ClipboardItem({ 'image/png': blob })]);
@@ -358,36 +377,34 @@
   // 渲染可能耗时较长（图片逐个抓取），clipboard.write 的瞬态用户激活窗口
   // （Chrome 约 5 秒）会过期导致写入被拒；失败时缓存已渲染的 blob，
   // 提示用户再次点击——第二次点击处于新的激活窗口内，可直接写入。
-  let cachedCopyBlob = null;
-  let cachedCopyKey = null;
+  // 缓存键必须是元素对象本身：把 DOM 元素拼成字符串会让所有 <div> 共用
+  // [object HTMLDivElement]，重选后误命中上一元素的图。
+  let copyCache = null; // { el, format, blob }
 
   async function onCopy() {
     if (!selectedEl) return;
     const copyBtn = toolbar.querySelector('.wps-copy');
     copyBtn.disabled = true;
-    const key = selectedEl + '|' + saveFormat;
     setToolbarMessage(t('copying'));
     try {
-      // 命中缓存（同元素同格式）则跳过渲染，立即写入以利用本次点击的激活窗口
-      const blob =
-        cachedCopyBlob && cachedCopyKey === key ? cachedCopyBlob : await renderToBlob(selectedEl, saveFormat);
+      // 命中缓存（同一元素、同一格式）则跳过渲染，立即写入以利用本次点击的激活窗口
+      const hit = copyCache && copyCache.el === selectedEl && copyCache.format === saveFormat;
+      const blob = hit ? copyCache.blob : await renderToBlob(selectedEl, saveFormat);
       try {
         await copyBlobToClipboard(blob);
-        cachedCopyBlob = null;
-        cachedCopyKey = null;
+        copyCache = null;
         setToolbarMessage(t('copied'));
         // 短暂展示成功提示后恢复元素信息
         setTimeout(() => {
           if (selectedEl && toolbar.style.display !== 'none') refreshToolbarInfo();
         }, 2000);
       } catch (err) {
-        if (!navigator.clipboard || typeof window.ClipboardItem === 'undefined') {
+        if (!supportsClipboard()) {
           // 环境不支持剪贴板（非安全上下文等），重试也不会成功
           setToolbarMessage(t('copyFailed') + t('copyUnsupported'), true);
         } else {
           // 写入失败（多为激活窗口过期）：缓存已渲染的图片，提示再次点击
-          cachedCopyBlob = blob;
-          cachedCopyKey = key;
+          copyCache = { el: selectedEl, format: saveFormat, blob };
           setToolbarMessage(t('copyRetry'));
         }
       }
@@ -400,8 +417,6 @@
 
   // 渲染所选元素为 PNG blob（保存与复制共用）
   async function renderToBlob(el, format) {
-    await document.fonts.ready;
-
     const nodeCount = el.querySelectorAll('*').length + 1;
     if (nodeCount > MAX_NODE_COUNT) {
       console.warn(t('nodeWarn', { count: nodeCount }));
@@ -415,6 +430,8 @@
     }
 
     try {
+      // 字体必须从捕获上下文取：手机格式下是 iframe 的 document
+      await settleWithin(renderTarget.ctx.doc.fonts.ready, RESOURCE_WAIT_MS);
       const { blob, width, height } = await renderElementToBlob(renderTarget.element, renderTarget.ctx);
       if (width <= 0 || height <= 0) {
         throw new Error(t('errZeroSize'));
@@ -443,65 +460,79 @@
   async function setupMobileContext(el) {
     const iframe = document.createElement('iframe');
     iframe.style.cssText =
-      `position:fixed;top:0;left:-10000px;width:${MOBILE_WIDTH}px;height:2000px;border:0;visibility:hidden;`;
+      `position:fixed;top:0;left:-10000px;width:${MOBILE_WIDTH}px;height:${IFRAME_PROBE_HEIGHT}px;border:0;visibility:hidden;`;
     document.documentElement.appendChild(iframe);
 
-    const iDoc = iframe.contentDocument;
-    const iWin = iframe.contentWindow;
-    if (!iDoc || !iWin) throw new Error(t('errIframe'));
+    try {
+      const iDoc = iframe.contentDocument;
+      const iWin = iframe.contentWindow;
+      if (!iDoc || !iWin) throw new Error(t('errIframe'));
 
-    iDoc.body.style.margin = '0';
-    iDoc.body.style.width = MOBILE_WIDTH + 'px';
-    copyAttributes(document.documentElement, iDoc.documentElement);
-    copyAttributes(document.body, iDoc.body);
+      // 先拷贝页面属性再写重排前提：copyAttributes 会用页面 style 属性整体覆盖，
+      // 顺序反了会把下面设置的 375px 宽度与零 margin 冲掉。
+      copyAttributes(document.documentElement, iDoc.documentElement);
+      copyAttributes(document.body, iDoc.body);
+      iDoc.body.style.margin = '0';
+      iDoc.body.style.width = MOBILE_WIDTH + 'px';
 
-    for (const s of document.querySelectorAll('style, link[rel="stylesheet"]')) {
-      if (s.tagName === 'STYLE') {
-        const st = iDoc.createElement('style');
-        st.textContent = rewriteCssUrls(s.textContent);
-        iDoc.head.appendChild(st);
-      } else {
-        const link = iDoc.createElement('link');
-        link.rel = 'stylesheet';
-        link.href = s.href;
-        iDoc.head.appendChild(link);
+      const pendingLinks = [];
+      for (const s of document.querySelectorAll('style, link[rel="stylesheet"]')) {
+        if (s.tagName === 'STYLE') {
+          const st = iDoc.createElement('style');
+          st.textContent = rewriteCssUrls(s.textContent);
+          iDoc.head.appendChild(st);
+        } else {
+          const link = iDoc.createElement('link');
+          link.rel = 'stylesheet';
+          // 先挂 load/error 监听再设 href，避免缓存命中时错过 load 事件
+          pendingLinks.push(waitForStylesheet(link));
+          link.href = s.href;
+          iDoc.head.appendChild(link);
+        }
       }
-    }
 
-    const clone = el.cloneNode(true);
-    absolutizeUrls(clone);
-    iDoc.body.appendChild(clone);
+      const clone = el.cloneNode(true);
+      absolutizeUrls(clone);
+      iDoc.body.appendChild(clone);
 
-    // 等待样式表生效、字体与图片加载
-    await new Promise((r) => setTimeout(r, 200));
-    await iWin.document.fonts.ready;
-    await waitForImages(iDoc);
+      // 等待样式表生效、字体与图片加载：三者都带超时，慢资源不会永久卡住捕获
+      await new Promise((r) => setTimeout(r, LAYOUT_SETTLE_MS));
+      await Promise.all([
+        waitForStylesheets(pendingLinks),
+        settleWithin(iWin.document.fonts.ready, RESOURCE_WAIT_MS),
+        waitForImages(iDoc),
+      ]);
 
-    let captureTarget = clone;
-    const layoutWidth = clone.getBoundingClientRect().width;
-    if (layoutWidth > MOBILE_WIDTH) {
-      // 非响应式站点（固定宽度布局）：优先流式重排——用 max-width 压掉固定
-      // 宽度、保持文字原始字号，让内容在 375px 内自然换行，避免整页等比
-      // 缩放导致文字小到看不清。
-      clone.classList.add('wps-reflow');
-      injectReflowStyles(iDoc);
-      await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
-      // 兜底：表格/代码块等 max-width 压不动的元素重排后仍超宽，此时剩余
-      // 超宽比例通常很小，再等比缩放防截断。zoom 元素的 offsetWidth 语义
-      // 不可靠，故外包一个固定宽度容器，捕获容器而非缩放元素本身。
-      const reflowedWidth = clone.getBoundingClientRect().width;
-      if (reflowedWidth > MOBILE_WIDTH) {
-        const wrapper = iDoc.createElement('div');
-        wrapper.style.width = MOBILE_WIDTH + 'px';
-        clone.style.zoom = String(MOBILE_WIDTH / reflowedWidth);
-        wrapper.appendChild(clone);
-        iDoc.body.appendChild(wrapper);
-        captureTarget = wrapper;
+      let captureTarget = clone;
+      const layoutWidth = clone.getBoundingClientRect().width;
+      if (layoutWidth > MOBILE_WIDTH) {
+        // 非响应式站点（固定宽度布局）：优先流式重排——用 max-width 压掉固定
+        // 宽度、保持文字原始字号，让内容在 375px 内自然换行，避免整页等比
+        // 缩放导致文字小到看不清。
+        clone.classList.add('wps-reflow');
+        injectReflowStyles(iDoc);
         await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
+        // 兜底：表格/代码块等 max-width 压不动的元素重排后仍超宽，此时剩余
+        // 超宽比例通常很小，再等比缩放防截断。zoom 元素的 offsetWidth 语义
+        // 不可靠，故外包一个固定宽度容器，捕获容器而非缩放元素本身。
+        const reflowedWidth = clone.getBoundingClientRect().width;
+        if (reflowedWidth > MOBILE_WIDTH) {
+          const wrapper = iDoc.createElement('div');
+          wrapper.style.width = MOBILE_WIDTH + 'px';
+          clone.style.zoom = String(MOBILE_WIDTH / reflowedWidth);
+          wrapper.appendChild(clone);
+          iDoc.body.appendChild(wrapper);
+          captureTarget = wrapper;
+          await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
+        }
       }
-    }
 
-    return { element: captureTarget, ctx: makeContext(iWin), iframe };
+      return { element: captureTarget, ctx: makeContext(iWin), iframe };
+    } catch (err) {
+      // 任何一步失败都要移除 iframe：renderToBlob 的 finally 拿不到未返回的 target
+      iframe.remove();
+      throw err;
+    }
   }
 
   function copyAttributes(from, to) {
@@ -513,7 +544,9 @@
   function rewriteCssUrls(cssText) {
     return cssText.replace(/url\(\s*["']?([^"')]+)["']?\s*\)/g, (match, raw) => {
       const u = raw.trim();
-      if (/^(data:|https?:)/i.test(u)) return match;
+      // 片段引用（#id）必须原样保留：它是同文档内的 SVG 定义引用，
+      // 绝对化成页面 URL 后会解析不到，抓取也只会拿回页面 HTML
+      if (/^(data:|https?:|#)/i.test(u)) return match;
       return `url("${new URL(u, location.href).href}")`;
     });
   }
@@ -556,9 +589,35 @@
     doc.head.appendChild(style);
   }
 
+  /** 最多等待 ms 毫秒：超时后按「资源未就绪」继续，不让捕获无限挂起 */
+  function settleWithin(promise, ms) {
+    return Promise.race([promise, new Promise((resolve) => setTimeout(resolve, ms))]);
+  }
+
+  /** loadImage 这类无图就无法继续的等待：超时按失败处理 */
+  function rejectAfter(promise, ms, error) {
+    return Promise.race([
+      promise,
+      new Promise((_, reject) => setTimeout(() => reject(error), ms)),
+    ]);
+  }
+
+  /** 等待单个样式表加载完成（onload / onerror 都算完成） */
+  function waitForStylesheet(link) {
+    return new Promise((resolve) => {
+      link.addEventListener('load', resolve, { once: true });
+      link.addEventListener('error', resolve, { once: true });
+    });
+  }
+
+  /** 等待一批样式表加载完成，整体受 RESOURCE_WAIT_MS 限制 */
+  function waitForStylesheets(promises) {
+    return settleWithin(Promise.all(promises), RESOURCE_WAIT_MS);
+  }
+
   function waitForImages(doc) {
     const imgs = Array.from(doc.images);
-    return Promise.all(
+    const allLoaded = Promise.all(
       imgs.map(
         (img) =>
           img.complete
@@ -569,6 +628,8 @@
               })
       )
     );
+    // 懒加载/悬挂图片可能既不 load 也不 error，必须有超时兜底
+    return settleWithin(allLoaded, RESOURCE_WAIT_MS);
   }
 
   /**
@@ -617,12 +678,16 @@
   }
 
   function loadImage(url, ctx) {
-    return new Promise((resolve, reject) => {
-      const img = ctx.createImage();
-      img.onload = () => resolve(img);
-      img.onerror = () => reject(new Error(t('errSvgLoad')));
-      img.src = url;
-    });
+    return rejectAfter(
+      new Promise((resolve, reject) => {
+        const img = ctx.createImage();
+        img.onload = () => resolve(img);
+        img.onerror = () => reject(new Error(t('errSvgLoad')));
+        img.src = url;
+      }),
+      RESOURCE_WAIT_MS,
+      new Error(t('errSvgLoad'))
+    );
   }
 
   function canvasToBlob(canvas) {
@@ -635,17 +700,22 @@
   }
 
   /**
+   * 按文档顺序把原树与克隆体配对：cloneNode(true) 保证两者结构一致。
+   * 计算样式必须取自「原 DOM 树」中的元素，再写回 clone 对应节点。
+   */
+  function pairElements(srcRoot, dstRoot) {
+    const srcEls = [srcRoot, ...srcRoot.querySelectorAll('*')];
+    const dstEls = [dstRoot, ...dstRoot.querySelectorAll('*')];
+    return srcEls.map((src, i) => [src, dstEls[i]]);
+  }
+
+  /**
    * 深克隆元素并把整个子树的内联计算样式写回，保证 foreignObject 里
    * 渲染结果与页面一致（高度、颜色、字体、布局等均已解析为具体值）。
    */
   function cloneElementWithStyles(el, ctx) {
     const clone = el.cloneNode(true);
-    const srcEls = [el, ...el.querySelectorAll('*')];
-    const dstEls = [clone, ...clone.querySelectorAll('*')];
-
-    for (let i = 0; i < srcEls.length; i++) {
-      const src = srcEls[i];
-      const dst = dstEls[i];
+    for (const [src, dst] of pairElements(el, clone)) {
       if (!src || !dst) continue;
       const cs = ctx.getComputedStyle(src);
       const st = dst.style;
@@ -709,7 +779,11 @@
     );
   }
 
-  /** 截图对应的页面链接：weibo.com 取该条微博详情链接，其他站点用当前地址 */
+  /**
+   * 截图对应的页面链接：weibo.com 取该条微博详情链接，其他站点用当前地址。
+   * 注意：页面级信息必须从主文档读取——手机格式下捕获上下文 ctx 指向
+   * about:blank iframe，用 ctx 查不到当前页面的链接。
+   */
   function resolvePageLink(el) {
     if (location.hostname === 'weibo.com' || location.hostname.endsWith('.weibo.com')) {
       const postLink = findWeiboPostLink(el);
@@ -763,8 +837,9 @@
     // 而 inlineResources 按「原树与克隆体同索引」配对，顺序颠倒会导致
     // 被移除节点之后的 img 全部错位、无法内联（如含 <video> 的文章正文）
     await inlineResources(el, clone, ctx);
-    // 引用收集同样会改变克隆体结构，故必须在 inlineResources 之后执行
-    collectExternalSvgRefs(clone);
+    // 引用收集同样会改变克隆体结构，故必须在 inlineResources 之后执行；
+    // 收集过程会把选区外 def 内部的外部资源一并内联
+    await collectExternalSvgRefs(clone);
     stripUnwanted(clone, ctx);
 
     // 强制 border-box 并清除 min/max 约束：offsetWidth/Height 是边框盒尺寸，
@@ -861,21 +936,46 @@
     return div;
   }
 
+  // 计算样式中需要内联 URL 的属性：[getComputedStyle 属性名, CSS 属性名]
+  const CSS_URL_PROPS = [
+    ['backgroundImage', 'background-image'],
+    ['maskImage', 'mask-image'],
+    ['webkitMaskImage', '-webkit-mask-image'],
+  ];
+
   /**
-   * 将 <img> 与 background-image 尽量转为 dataURL，避免 SVG 图像
-   * 加载外部资源失败导致截图缺图。fetch 失败（跨域无 CORS）时保留原地址。
+   * 把某个计算样式属性里的 url() 资源内联为 data URL 并写回 clone。
+   *  - 片段引用（#id）必须原样保留：它指向同文档的 SVG 定义，抓取只会拿回页面 HTML
+   *  - 替换用函数式 replace 按出现顺序进行，避免 url 重复/包含关系时按索引错位
+   */
+  function inlineCssUrls(ctx, src, dst, getProp, cssProp) {
+    const css = ctx.getComputedStyle(src)[getProp];
+    if (!css || !css.includes('url(')) return null;
+    const urlRe = /url\(\s*["']?([^"')]+)["']?\s*\)/g;
+    const urls = [...css.matchAll(urlRe)].map((m) => m[1]);
+    if (!urls.length) return null;
+    return Promise.all(
+      urls.map((u) =>
+        /^(data:|#)/i.test(u) ? Promise.resolve(u) : fetchAsDataUrl(u).catch(() => TRANSPARENT_PIXEL)
+      )
+    ).then((resolved) => {
+      let i = 0;
+      dst.style.setProperty(cssProp, css.replace(urlRe, () => resolved[i++]), 'important');
+    });
+  }
+
+  /**
+   * 将 <img>、background-image、mask-image 尽量转为 dataURL，避免 SVG 图像
+   * 加载外部资源失败导致截图缺图。抓取失败（跨域无 CORS / 防盗链）时写入
+   * TRANSPARENT_PIXEL 透明占位，保证画布不被污染、导出不失败。
    * 注意：计算样式必须取自「原 DOM 树」中的元素（clone 是脱离文档的，
    * getComputedStyle 对其返回空值），再写回 clone 对应节点。
    */
   async function inlineResources(originalEl, clone, ctx) {
     const SVG_NS = 'http://www.w3.org/2000/svg';
     const jobs = [];
-    const srcEls = [originalEl, ...originalEl.querySelectorAll('*')];
-    const dstEls = [clone, ...clone.querySelectorAll('*')];
 
-    for (let i = 0; i < srcEls.length; i++) {
-      const src = srcEls[i];
-      const dst = dstEls[i];
+    for (const [src, dst] of pairElements(originalEl, clone)) {
       if (!src || !dst) continue;
 
       // <img>：内联 src。优先 currentSrc（srcset 实际生效地址），失败后回退
@@ -936,47 +1036,10 @@
         }
       }
 
-      // background-image：逐个 url() 转 dataURL
-      const bg = ctx.getComputedStyle(src).backgroundImage;
-      if (bg && bg.includes('url(')) {
-        const urls = [...bg.matchAll(/url\(["']?([^"')]+)["']?\)/g)].map((m) => m[1]);
-        const job = Promise.all(
-          urls.map((u) =>
-            /^data:/i.test(u) ? Promise.resolve(u) : fetchAsDataUrl(u).catch(() => TRANSPARENT_PIXEL)
-          )
-        ).then((resolved) => {
-          let next = bg;
-          resolved.forEach((dataUrl, idx) => {
-            next = next.replace(urls[idx], dataUrl);
-          });
-          dst.style.setProperty('background-image', next, 'important');
-        });
-        jobs.push(job);
-      }
-
-      // mask-image / -webkit-mask-image：图标系统常用 mask 裁切，相对路径
-      // 在 data URL 文档中失效会导致图标整体消失，与背景图同样内联。
-      // 读取用 camelCase 属性名，setProperty 必须用 CSS 属性名（kebab-case）
-      const MASK_PROPS = [
-        ['maskImage', 'mask-image'],
-        ['webkitMaskImage', '-webkit-mask-image'],
-      ];
-      for (const [getProp, cssProp] of MASK_PROPS) {
-        const mask = ctx.getComputedStyle(src)[getProp];
-        if (!mask || !mask.includes('url(')) continue;
-        const urls = [...mask.matchAll(/url\(["']?([^"')]+)["']?\)/g)].map((m) => m[1]);
-        const job = Promise.all(
-          urls.map((u) =>
-            /^data:/i.test(u) ? Promise.resolve(u) : fetchAsDataUrl(u).catch(() => TRANSPARENT_PIXEL)
-          )
-        ).then((resolved) => {
-          let next = mask;
-          resolved.forEach((dataUrl, idx) => {
-            next = next.replace(urls[idx], dataUrl);
-          });
-          dst.style.setProperty(cssProp, next, 'important');
-        });
-        jobs.push(job);
+      // background-image / mask-image：逐个 url() 转 dataURL（片段引用保留）
+      for (const [getProp, cssProp] of CSS_URL_PROPS) {
+        const job = inlineCssUrls(ctx, src, dst, getProp, cssProp);
+        if (job) jobs.push(job);
       }
     }
 
@@ -1004,8 +1067,10 @@
    *  - 定义自身的嵌套引用（如 symbol 内部再引用渐变）递归归入同一 svg 根
    *  - 需在 inlineResources 之后执行：插入 defs 会改变克隆体节点顺序，
    *    破坏 inlineResources 的"原树与克隆体同索引"配对
+   *  - 克隆出的 def 自身也要再 inlineResources 一次：def 内的外部 <image>
+   *    与背景图若不内联，序列化成 data URL 文档后会加载失败、图片缺失
    */
-  function collectExternalSvgRefs(clone) {
+  async function collectExternalSvgRefs(clone) {
     const SVG_NS = 'http://www.w3.org/2000/svg';
     const ID_REF_RE = /^#([A-Za-z_][\w:.-]*)$/;
     const URL_REF_RE = /url\(\s*["']?#([A-Za-z_][\w:.-]*)["']?\s*\)/g;
@@ -1041,6 +1106,9 @@
       // contains 对主文档元素永远返回 false，会把区内引用误判为区外
       if (!def || clone.querySelector('#' + CSS.escape(id))) continue;
       const defClone = cloneElementWithStyles(def, pageCtx);
+      // def 内部的资源（SVG <image>、背景图等）同样必须内联，
+      // pageCtx 是因为定义来自主文档（手机格式下 iframe ctx 读不到其计算样式）
+      await inlineResources(def, defClone, pageCtx);
       // 定义自身的嵌套引用（如 symbol 内再引用渐变）必须与定义同根解析
       scan(def, svgHost, (host, nestedId) => pending.push({ svgHost: host, id: nestedId }));
       if (!defsBySvg.has(svgHost)) defsBySvg.set(svgHost, []);
@@ -1065,7 +1133,12 @@
    */
   async function fetchAsDataUrl(url) {
     try {
-      const resp = await fetch(url, { mode: 'cors', credentials: 'include' });
+      // 直连也要设上限：跨域请求既不返回也不报错时同样会卡住捕获
+      const resp = await fetch(url, {
+        mode: 'cors',
+        credentials: 'include',
+        signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
+      });
       if (!resp.ok) throw new Error('HTTP ' + resp.status);
       return await blobToDataUrl(await resp.blob());
     } catch {

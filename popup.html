@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="zh-CN">
+<html>
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
@@ -8,14 +8,15 @@
 </head>
 <body>
   <main class="card">
-    <h1 id="i18n-title">网页快照</h1>
-    <p class="desc" id="i18n-description">在页面上选择任意元素，保存为图片。</p>
-    <button id="start" type="button">开始选择元素</button>
+    <!-- 可见文案一律由 popup.js 从 i18n 词典填充，避免硬编码语言 -->
+    <h1 id="i18n-title"></h1>
+    <p class="desc" id="i18n-description"></p>
+    <button id="start" type="button"></button>
     <p id="status" class="status" role="status"></p>
     <p class="tips">
-      <span id="i18n-tipFormats">支持默认、手机两种格式</span>
-      <span id="i18n-tipEsc">选中后按 <kbd>Esc</kbd> 可取消</span>
-      <span id="i18n-tipDownload">图片自动保存到「下载」文件夹</span>
+      <span id="i18n-tipFormats"></span>
+      <span id="i18n-tipEsc"></span>
+      <span id="i18n-tipDownload"></span>
     </p>
   </main>
   <script src="i18n.js"></script>

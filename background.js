@@ -30,7 +30,8 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   }
 
   if (msg && msg.type === 'WPS_FETCH_DATA_URL') {
-    fetchWithPageReferer(msg.url, sender.url || '')
+    // 携带发起标签页 id：DNR 会话规则据此限定作用范围，避免影响其他标签页
+    fetchWithPageReferer(msg.url, sender.url || '', sender.tab && sender.tab.id)
       .then(blobToDataUrl)
       .then((dataUrl) => sendResponse({ ok: true, dataUrl }))
       .catch((err) => sendResponse({ ok: false, error: err.message }));
@@ -39,6 +40,10 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
 
   return false;
 });
+
+// 单次抓取上限：跨域请求既不返回也不报错时，避免 content script 的
+// 「正在生成图片…」永久挂起（超时按抓取失败，由调用方降级为透明占位）
+const FETCH_TIMEOUT_MS = 15000;
 
 // 会话规则在「浏览器关闭 / 扩展更新」时才会清空，跨 SW 重启持久存在；
 // SW 若在 fetch 期间被回收（finally 未执行）可能残留规则。规则 id 用
@@ -54,12 +59,14 @@ function escapeRegExp(s) {
  * 带页面来源 Referer 抓取资源：
  *  - 添加会话规则，把目标 URL 请求的 Referer 改写为页面 origin（如
  *    https://weibo.com/），以通过 sinaimg 等图床的防盗链校验；
- *    规则限定 resourceTypes 为 xmlhttprequest，避免命中页面自身的请求
+ *    规则限定 resourceTypes 为 xmlhttprequest（避开导航、图片等子资源），
+ *    并在能拿到发起标签页 id 时用 tabIds 限定，避免影响其他标签页；
+ *    同一标签页内页面自身对同一 URL 的 XHR 仍会命中，影响限于抓取窗口
  *  - fetch 完成后在 finally 中立即移除规则，避免影响其他请求
  *  - 规则不可用时（非 http(s) URL、sender.url 缺失等）退回裸请求，
  *    行为与修复前一致
  */
-async function fetchWithPageReferer(url, pageUrl) {
+async function fetchWithPageReferer(url, pageUrl, tabId) {
   let ruleId = 0;
   try {
     const origin = new URL(pageUrl).origin;
@@ -77,6 +84,7 @@ async function fetchWithPageReferer(url, pageUrl) {
             condition: {
               regexFilter: '^' + escapeRegExp(url) + '$',
               resourceTypes: ['xmlhttprequest'],
+              ...(typeof tabId === 'number' ? { tabIds: [tabId] } : {}),
             },
           },
         ],
@@ -87,7 +95,10 @@ async function fetchWithPageReferer(url, pageUrl) {
     ruleId = 0;
   }
   try {
-    const resp = await fetch(url, { credentials: 'include' });
+    const resp = await fetch(url, {
+      credentials: 'include',
+      signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
+    });
     if (!resp.ok) throw new Error('HTTP ' + resp.status);
     return await resp.blob();
   } finally {
