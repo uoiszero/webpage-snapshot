@@ -37,6 +37,8 @@
   // 资源等待与抓取上限：超时按「资源缺失」降级出图，避免捕获无限挂起
   const RESOURCE_WAIT_MS = 5000;
   const FETCH_TIMEOUT_MS = 15000;
+  // 复制成功后「已复制」提示的停留时长，随后收起工具条（与保存成功后一致）
+  const COPY_SUCCESS_HIDE_MS = 800;
   // 无法内联的资源（跨域/防盗链）换成透明像素，避免污染画布导致导出失败。
   // 注意：必须保证是真正的透明像素 rgba(0,0,0,0) —— 此前误用了一个
   // 半透明蓝（rgba(0,0,255,127)）的 1x1 PNG，导致图片区域渲染成淡蓝色色块。
@@ -380,11 +382,15 @@
   // 缓存键必须是元素对象本身：把 DOM 元素拼成字符串会让所有 <div> 共用
   // [object HTMLDivElement]，重选后误命中上一元素的图。
   let copyCache = null; // { el, format, blob }
+  // 复制轮次：成功后的延时收起只在「没有更新一轮复制」时生效，
+  // 避免上一轮的计时器把下一轮正在展示的「正在生成图片…」工具条收掉
+  let copyOpSeq = 0;
 
   async function onCopy() {
     if (!selectedEl) return;
     const copyBtn = toolbar.querySelector('.wps-copy');
     copyBtn.disabled = true;
+    const opSeq = ++copyOpSeq;
     setToolbarMessage(t('copying'));
     try {
       // 命中缓存（同一元素、同一格式）则跳过渲染，立即写入以利用本次点击的激活窗口
@@ -394,10 +400,13 @@
         await copyBlobToClipboard(blob);
         copyCache = null;
         setToolbarMessage(t('copied'));
-        // 短暂展示成功提示后恢复元素信息
+        // 复制成功后与保存一致收起工具条：先短暂展示「已复制」给用户反馈，
+        // 再自动隐藏（此前一直不隐藏，只能按 Esc 手动退出）。
+        // 失败路径（激活窗口过期）必须保留工具条供再次点击，故不在这里处理。
         setTimeout(() => {
-          if (selectedEl && toolbar.style.display !== 'none') refreshToolbarInfo();
-        }, 2000);
+          const info = toolbar.querySelector('.wps-info');
+          if (opSeq === copyOpSeq && info.textContent === t('copied')) hideToolbar();
+        }, COPY_SUCCESS_HIDE_MS);
       } catch (err) {
         if (!supportsClipboard()) {
           // 环境不支持剪贴板（非安全上下文等），重试也不会成功
