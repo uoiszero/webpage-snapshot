@@ -74,7 +74,8 @@ webpage-snapshot/          # 全部文件位于根目录，无子目录
 - 新增 i18n key 必须 zh 与 en **两个词典同步添加**，参数占位符（`{width}`/`{count}`/`{key}`）两边一致
 - content script 与 background 通信统一 `chrome.runtime.sendMessage`，消息类型前缀 `WPS_`（`WPS_DOWNLOAD` / `WPS_FETCH_DATA_URL`）；popup 启动选择用 `chrome.tabs.sendMessage` 发送 `WPS_START_SELECT`（popup → content）
 - 捕获管线必须通过 `ctx` 操作 DOM（`getComputedStyle`/`Image`/canvas/`XMLSerializer` 均从 ctx 取），不直接用全局
-- 可调常量集中在 `content.js` 顶部：`MOBILE_WIDTH`(375)、`PADDING`(20)、`MAX_CANVAS_DIM`(16384)、`MAX_NODE_COUNT`(5000)、`FOOTER_HEIGHT`(53)、`TRANSPARENT_PIXEL`、`IFRAME_PROBE_HEIGHT`(2000)、`LAYOUT_SETTLE_MS`(200)、`RESOURCE_WAIT_MS`(5000)、`FETCH_TIMEOUT_MS`(15000)；后两个是资源等待/抓取上限，超时按资源缺失降级出图，避免捕获无限挂起
+- 可调常量集中在 `content.js` 顶部：`MOBILE_WIDTH`(375)、`PADDING`(20)、`MAX_CANVAS_DIM`(16384)、`MAX_NODE_COUNT`(5000)、`FOOTER_HEIGHT`(53)、`TRANSPARENT_PIXEL`、`IFRAME_PROBE_HEIGHT`(2000)、`LAYOUT_SETTLE_MS`(200)、`RESOURCE_WAIT_MS`(5000)、`FETCH_TIMEOUT_MS`(15000)、`COPY_SUCCESS_HIDE_MS`(800)；`RESOURCE_WAIT_MS`/`FETCH_TIMEOUT_MS` 是资源等待/抓取上限，超时按资源缺失降级出图，避免捕获无限挂起
+- 「保存」与「复制」成功后的收尾必须一致：都收起工具条。复制要先展示 `COPY_SUCCESS_HIDE_MS`（800ms）的「已复制到剪贴板」提示再隐藏；复制**失败**（激活窗口过期，需用户再点一次）时禁止隐藏，否则用户无法重试
 - `appendFooter` 的信息条高度必须与 `FOOTER_HEIGHT` 严格一致，修改底部信息条布局时需同步更新该常量
 
 ## ANTI-PATTERNS (THIS PROJECT)
@@ -107,5 +108,6 @@ node --check *.js            # 语法校验（i18n/background/popup/content）
 - 选区外 SVG 定义由 `collectExternalSvgRefs` 克隆进克隆体后，必须再对其执行 `inlineResources`，否则 def 内的外部 `<image>`/背景图不会内联
 - `Esc` 在选择态与工具条态都生效：`keydown` 监听在 `startSelection` 注册、`cleanupAll` 移除，`cleanupSelection` 只清选择态监听
 - 微博图片 URL 带一次性签名参数 `ssig`（加载后失效），`inlineResources` 会剥离该参数后重试
+- 防盗链用的 DNR Referer 会话规则**不能**加 `condition.tabIds`：抓取由扩展 service worker 发起，这类请求不关联任何标签页，带 `tabIds` 的规则永不命中，Referer 不会被改写，sinaimg 返回 403，微博配图在截图里全部变成透明占位；影响面靠「精确到单条 URL 的 `regexFilter` + 抓取结束立即移除」收敛
 - 超长元素（>5000 节点）捕获会明显变慢，超限仅告警不中止
 - `saveAs: false` 选项在 `background.js` 的 downloads 调用处
