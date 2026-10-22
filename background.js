@@ -30,8 +30,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   }
 
   if (msg && msg.type === 'WPS_FETCH_DATA_URL') {
-    // 携带发起标签页 id：DNR 会话规则据此限定作用范围，避免影响其他标签页
-    fetchWithPageReferer(msg.url, sender.url || '', sender.tab && sender.tab.id)
+    fetchWithPageReferer(msg.url, sender.url || '')
       .then(blobToDataUrl)
       .then((dataUrl) => sendResponse({ ok: true, dataUrl }))
       .catch((err) => sendResponse({ ok: false, error: err.message }));
@@ -59,14 +58,16 @@ function escapeRegExp(s) {
  * 带页面来源 Referer 抓取资源：
  *  - 添加会话规则，把目标 URL 请求的 Referer 改写为页面 origin（如
  *    https://weibo.com/），以通过 sinaimg 等图床的防盗链校验；
- *    规则限定 resourceTypes 为 xmlhttprequest（避开导航、图片等子资源），
- *    并在能拿到发起标签页 id 时用 tabIds 限定，避免影响其他标签页；
- *    同一标签页内页面自身对同一 URL 的 XHR 仍会命中，影响限于抓取窗口
+ *    规则限定 resourceTypes 为 xmlhttprequest（避开导航、图片等子资源）
+ *  - **不能**用 condition.tabIds 限定作用范围：这里的 fetch 由扩展 service
+ *    worker 发起，不关联任何标签页（tabId 为 -1），带 tabIds 的条件永远不命中，
+ *    Referer 不会被改写，sinaimg 返回 403，截图里的微博配图全部变成透明占位。
+ *    影响面由「精确到单条 URL 的 regexFilter + 抓取结束立即移除」收敛即可
  *  - fetch 完成后在 finally 中立即移除规则，避免影响其他请求
  *  - 规则不可用时（非 http(s) URL、sender.url 缺失等）退回裸请求，
  *    行为与修复前一致
  */
-async function fetchWithPageReferer(url, pageUrl, tabId) {
+async function fetchWithPageReferer(url, pageUrl) {
   let ruleId = 0;
   try {
     const origin = new URL(pageUrl).origin;
@@ -84,7 +85,6 @@ async function fetchWithPageReferer(url, pageUrl, tabId) {
             condition: {
               regexFilter: '^' + escapeRegExp(url) + '$',
               resourceTypes: ['xmlhttprequest'],
-              ...(typeof tabId === 'number' ? { tabIds: [tabId] } : {}),
             },
           },
         ],
